@@ -153,7 +153,7 @@ pub trait SolutionAccess {
     fn max_brain_clz(&self) -> Result<(f64, f64), SpeciesAccessError>;
 }
 
-#[cfg(feature = "polars")]
+#[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
 pub trait ToDataFrame {
     fn to_dataframe(self) -> Result<polars::frame::DataFrame, polars::error::PolarsError>;
 }
@@ -165,7 +165,7 @@ pub trait ToDataFrame {
 // Additionally modified by NSBuitrago <mail@nsbuitrago.xyz> for appending `t` field
 // from `Solution` structs.
 
-#[cfg(feature = "polars")]
+#[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
 #[macro_export]
 macro_rules! struct_to_dataframe {
     ($input:expr, [$($field:ident),+]) => {

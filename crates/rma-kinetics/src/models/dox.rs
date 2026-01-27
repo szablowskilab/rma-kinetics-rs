@@ -56,10 +56,10 @@ use pyo3::{PyResult, exceptions::PyValueError, pyclass, pyfunction, pymethods};
 #[cfg(feature = "py")]
 use rma_kinetics_derive::PySolve;
 
-#[cfg(feature = "polars")]
+#[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
 use crate::solve::ToDataFrame;
 
-#[cfg(feature = "polars")]
+#[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
 use polars::{error::PolarsError, frame::DataFrame};
 
 #[cfg(feature = "serde")]
@@ -267,7 +267,7 @@ impl SolutionAccess for Solution<f64, State<f64>> {
     }
 }
 
-#[cfg(feature = "polars")]
+#[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
 impl ToDataFrame for Solution<f64, State<f64>> {
     fn to_dataframe(self) -> Result<DataFrame, PolarsError> {
         use crate::struct_to_dataframe;
@@ -691,7 +691,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "polars")]
+    #[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
     #[test]
     fn dataframe_conversion() -> Result<(), PolarsError> {
         let mut solver = ExplicitRungeKutta::dopri5();

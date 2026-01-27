@@ -40,6 +40,9 @@ mod solve;
 
 pub use solve::{ApplyNoise, SolutionAccess, Solve, SpeciesAccessError};
 
+#[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
+pub use solve::ToDataFrame;
+
 #[cfg(feature = "py")]
 use pyo3::prelude::*;
 
