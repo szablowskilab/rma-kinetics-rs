@@ -153,6 +153,40 @@ pub trait SolutionAccess {
     fn max_brain_clz(&self) -> Result<(f64, f64), SpeciesAccessError>;
 }
 
+#[cfg(feature = "polars")]
+pub trait ToDataFrame {
+    fn to_dataframe(self) -> Result<polars::frame::DataFrame, polars::error::PolarsError>;
+}
+
+// Source - https://stackoverflow.com/a
+// Posted by SirVer, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-01-27, License - CC BY-SA 4.0
+//
+// Additionally modified by NSBuitrago <mail@nsbuitrago.xyz> for appending `t` field
+// from `Solution` structs.
+
+#[cfg(feature = "polars")]
+#[macro_export]
+macro_rules! struct_to_dataframe {
+    ($input:expr, [$($field:ident),+]) => {
+        {
+            let len = $input.y.len().to_owned();
+
+            // Extract the field values into separate vectors
+            $(let mut $field = Vec::with_capacity(len);)*
+
+            for e in $input.y.into_iter() {
+                $($field.push(e.$field);)*
+            }
+
+            ::polars::df! {
+                "time" => $input.t,
+                $(stringify!($field) => $field,)*
+            }
+        }
+    };
+}
+
 #[macro_export]
 macro_rules! max_species {
     ($sln:expr, $species:ident) => {

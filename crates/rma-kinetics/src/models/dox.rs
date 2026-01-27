@@ -56,6 +56,12 @@ use pyo3::{PyResult, exceptions::PyValueError, pyclass, pyfunction, pymethods};
 #[cfg(feature = "py")]
 use rma_kinetics_derive::PySolve;
 
+#[cfg(feature = "polars")]
+use crate::solve::ToDataFrame;
+
+#[cfg(feature = "polars")]
+use polars::{error::PolarsError, frame::DataFrame};
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -258,6 +264,15 @@ impl SolutionAccess for Solution<f64, State<f64>> {
 
     fn max_brain_dox(&self) -> Result<(f64, f64), SpeciesAccessError> {
         Ok(crate::max_species!(self, brain_dox))
+    }
+}
+
+#[cfg(feature = "polars")]
+impl ToDataFrame for Solution<f64, State<f64>> {
+    fn to_dataframe(self) -> Result<DataFrame, PolarsError> {
+        use crate::struct_to_dataframe;
+
+        struct_to_dataframe!(self, [plasma_dox, brain_dox])
     }
 }
 
@@ -672,6 +687,30 @@ mod tests {
         assert!(unwrapped_solution.plasma_rma().is_err());
         assert!(unwrapped_solution.max_plasma_dox().is_ok());
         assert!(unwrapped_solution.max_plasma_rma().is_err());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "polars")]
+    #[test]
+    fn dataframe_conversion() -> Result<(), PolarsError> {
+        let mut solver = ExplicitRungeKutta::dopri5();
+        let init_state = State::zeros();
+        let custom_model = Model::builder()
+            .schedule(vec![AccessPeriod::new(40., 0.0..=24.)])
+            .build()
+            .unwrap();
+
+        let solution = custom_model.solve(0., 24., 1., init_state, &mut solver);
+        assert!(solution.is_ok());
+        let unwrapped_solution = solution.unwrap();
+
+        let dataframe = unwrapped_solution.to_dataframe()?;
+        assert_eq!(dataframe.shape(), (25, 3));
+        assert_eq!(
+            dataframe.get_column_names(),
+            &["time", "plasma_dox", "brain_dox"]
+        );
 
         Ok(())
     }

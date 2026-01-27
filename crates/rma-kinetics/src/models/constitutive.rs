@@ -46,6 +46,12 @@ use rma_kinetics_derive::Solve;
 
 use crate::impl_solution_access_basic_rma;
 
+#[cfg(feature = "polars")]
+use crate::solve::ToDataFrame;
+
+#[cfg(feature = "polars")]
+use polars::{error::PolarsError, frame::DataFrame};
+
 #[cfg(feature = "py")]
 use pyo3::{PyResult, exceptions::PyValueError, pyclass, pymethods};
 
@@ -101,6 +107,15 @@ impl<T: std::fmt::Display> std::fmt::Display for State<T> {
 }
 
 impl_solution_access_basic_rma!(Solution<f64, State<f64>>, State<f64>);
+
+#[cfg(feature = "polars")]
+impl ToDataFrame for Solution<f64, State<f64>> {
+    fn to_dataframe(self) -> Result<DataFrame, PolarsError> {
+        use crate::struct_to_dataframe;
+
+        struct_to_dataframe!(self, [brain_rma, plasma_rma])
+    }
+}
 
 #[cfg(feature = "py")]
 macro_rules! create_interface {
@@ -304,6 +319,25 @@ mod tests {
         let solution = model.solve(T0, TF, DT, State::default(), &mut solver);
 
         assert!(solution.is_ok());
+        Ok(())
+    }
+
+    #[cfg(feature = "polars")]
+    #[test]
+    fn dataframe_conversion() -> Result<(), PolarsError> {
+        let model = Model::default();
+        let mut solver = ExplicitRungeKutta::dopri5();
+        let solution = model.solve(T0, TF, DT, State::default(), &mut solver);
+
+        assert!(solution.is_ok());
+        let unwrapped_solution = solution.unwrap();
+        let dataframe = unwrapped_solution.to_dataframe()?;
+
+        assert_eq!(dataframe.shape(), (505, 3));
+        assert_eq!(
+            dataframe.get_column_names(),
+            &["time", "brain_rma", "plasma_rma"]
+        );
         Ok(())
     }
 }

@@ -48,6 +48,12 @@ use pyo3::{PyResult, exceptions::PyValueError, pyclass, pymethods};
 #[cfg(feature = "py")]
 use crate::solve::{InnerSolution, PySolution, PySolver};
 
+#[cfg(feature = "polars")]
+use crate::solve::ToDataFrame;
+
+#[cfg(feature = "polars")]
+use polars::{error::PolarsError, frame::DataFrame};
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -264,6 +270,30 @@ impl SolutionAccess for Solution<f64, State<f64>> {
 
     fn max_brain_clz(&self) -> Result<(f64, f64), SpeciesAccessError> {
         Ok(crate::max_species!(self, brain_clz))
+    }
+}
+
+#[cfg(feature = "polars")]
+impl ToDataFrame for Solution<f64, State<f64>> {
+    fn to_dataframe(self) -> Result<DataFrame, PolarsError> {
+        use crate::struct_to_dataframe;
+
+        struct_to_dataframe!(
+            self,
+            [
+                brain_rma,
+                plasma_rma,
+                tta,
+                plasma_dox,
+                brain_dox,
+                dreadd,
+                peritoneal_cno,
+                plasma_cno,
+                brain_cno,
+                plasma_clz,
+                brain_clz
+            ]
+        )
     }
 }
 
@@ -894,6 +924,40 @@ mod tests {
         let model = Model::builder().leaky_rma_prod(0.2).build()?;
         let solution = model.solve(0., 48., 1., state, &mut solver);
         assert!(solution.is_ok());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "polars")]
+    #[test]
+    fn dataframe_conversion() -> Result<(), PolarsError> {
+        let model = Model::default();
+        let state = State::zeros();
+        let mut solver = DiagonallyImplicitRungeKutta::kvaerno423();
+        let solution = model.solve(0., 48., 1., state, &mut solver);
+
+        assert!(solution.is_ok());
+        let solution = solution.unwrap();
+
+        let dataframe = solution.to_dataframe()?;
+        assert_eq!(dataframe.shape(), (49, 12));
+        assert_eq!(
+            dataframe.get_column_names(),
+            &[
+                "time",
+                "brain_rma",
+                "plasma_rma",
+                "tta",
+                "plasma_dox",
+                "brain_dox",
+                "dreadd",
+                "peritoneal_cno",
+                "plasma_cno",
+                "brain_cno",
+                "plasma_clz",
+                "brain_clz"
+            ]
+        );
 
         Ok(())
     }
