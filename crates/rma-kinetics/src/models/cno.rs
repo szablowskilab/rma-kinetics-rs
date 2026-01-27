@@ -40,8 +40,6 @@ use crate::solve::{InnerSolution, PySolution, PySolver};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use std::fmt;
-
 const CNO_MW: f64 = 342.8; // g/mol
 
 /// Defines a CNO dose given an amount in mg and administration time.

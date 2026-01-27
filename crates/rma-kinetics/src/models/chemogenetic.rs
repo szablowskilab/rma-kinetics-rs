@@ -51,8 +51,6 @@ use crate::solve::{InnerSolution, PySolution, PySolver};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use std::fmt;
-
 /// Chemogenetic model state.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(StateTrait, Builder)]

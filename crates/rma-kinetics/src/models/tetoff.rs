@@ -40,8 +40,6 @@ use rma_kinetics_derive::PySolve;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use std::fmt;
-
 /// Tet-Off model state.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(StateTrait)]

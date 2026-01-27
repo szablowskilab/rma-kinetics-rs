@@ -59,8 +59,6 @@ use rma_kinetics_derive::PySolve;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use std::fmt;
-
 const DOX_MW: f64 = 444.4; // g/mol
 
 /// Defines the concentration and period of access of dox food or water.

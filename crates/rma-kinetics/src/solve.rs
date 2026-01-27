@@ -9,8 +9,6 @@ use differential_equations::{
     traits,
 };
 
-use std::fmt;
-
 #[cfg(feature = "py")]
 pub use crate::models::chemogenetic;
 #[cfg(feature = "py")]
