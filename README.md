@@ -18,7 +18,9 @@ The core models include:
 - Chemogenetic: DREADD induced expression
 - Oscillating: proxy for monitoring rapidly changing gene expression
 
-Please see the [user guide](./docs/index.md) to learn more.
+Please see the [user guide](https://nsbuitrago.github.io/rma-kinetics-rs/) to learn more.
+See the [marimo notebooks](./notebooks) for interactive examples. These can be
+ran with `just notebook <name>` or with `marimo` directly.
 
 ## Installation
 
@@ -44,7 +46,7 @@ The latest version on PyPI uses the old Python implementation.
 To use the newer Python bindings, you can build them from source
 using [maturin](https://www.maturin.rs/).
 
-To get started, clone the repository and create a new virtual enviroment.:
+To get started, clone the repository and create a new virtual enviroment:
 In these examples, we use the [uv](https://docs.astral.sh/uv/) package manager.
 
 ```bash
