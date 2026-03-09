@@ -36,6 +36,8 @@
 //! println!("{:?}", solution.y);
 //! ```
 
+pub mod stochastic;
+
 use derive_builder::Builder;
 use differential_equations::{
     derive::State as StateTrait,
