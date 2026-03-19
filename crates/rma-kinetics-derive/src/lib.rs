@@ -155,10 +155,10 @@ pub fn stochastic_py_solve_derive(input: TokenStream) -> TokenStream {
                             .safety_factor(solver.safety_factor)
                             .min_scale(solver.min_scale)
                             .max_scale(solver.max_scale);
-                        problem.event(dt).solve(&mut solver_instance)?
+                        problem.even(dt).solve(&mut solver_instance)?
                     }
                     "ralston" => {
-                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::Ralston(solver.dt0)
+                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::ralston(solver.dt0)
                             .rtol(solver.rtol)
                             .atol(solver.atol)
                             .h0(solver.dt0)
@@ -169,10 +169,10 @@ pub fn stochastic_py_solve_derive(input: TokenStream) -> TokenStream {
                             .safety_factor(solver.safety_factor)
                             .min_scale(solver.min_scale)
                             .max_scale(solver.max_scale);
-                        problem.event(dt).solve(&mut solver_instance)?
+                        problem.even(dt).solve(&mut solver_instance)?
                     }
                     "heun" => {
-                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::Heun(solver.dt0)
+                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::heun(solver.dt0)
                             .rtol(solver.rtol)
                             .atol(solver.atol)
                             .h0(solver.dt0)
@@ -183,7 +183,7 @@ pub fn stochastic_py_solve_derive(input: TokenStream) -> TokenStream {
                             .safety_factor(solver.safety_factor)
                             .min_scale(solver.min_scale)
                             .max_scale(solver.max_scale);
-                        problem.event(dt).solve(&mut solver_instance)?
+                        problem.even(dt).solve(&mut solver_instance)?
                     }
                     _ => panic!("Solver '{}' is not supported for stochastic models. Use Euler, Midpoint, Heun, or Ralston.", solver.solver_type),
                 };
@@ -332,10 +332,10 @@ pub fn py_solve_derive(input: TokenStream) -> TokenStream {
                             .safety_factor(solver.safety_factor)
                             .min_scale(solver.min_scale)
                             .max_scale(solver.max_scale);
-                        problem.event(dt).solve(&mut solver_instance)?
+                        problem.even(dt).solve(&mut solver_instance)?
                     }
                     "ralston" => {
-                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::Ralston(solver.dt0)
+                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::ralston(solver.dt0)
                             .rtol(solver.rtol)
                             .atol(solver.atol)
                             .h0(solver.dt0)
@@ -346,10 +346,10 @@ pub fn py_solve_derive(input: TokenStream) -> TokenStream {
                             .safety_factor(solver.safety_factor)
                             .min_scale(solver.min_scale)
                             .max_scale(solver.max_scale);
-                        problem.event(dt).solve(&mut solver_instance)?
+                        problem.even(dt).solve(&mut solver_instance)?
                     }
                     "heun" => {
-                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::Heun(solver.dt0)
+                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::heun(solver.dt0)
                             .rtol(solver.rtol)
                             .atol(solver.atol)
                             .h0(solver.dt0)
@@ -360,7 +360,7 @@ pub fn py_solve_derive(input: TokenStream) -> TokenStream {
                             .safety_factor(solver.safety_factor)
                             .min_scale(solver.min_scale)
                             .max_scale(solver.max_scale);
-                        problem.event(dt).solve(&mut solver_instance)?
+                        problem.even(dt).solve(&mut solver_instance)?
                     }
                     _ => panic!("Solver not supported"),
                 };

@@ -62,6 +62,8 @@
               cargo-watch
               rust-analyzer
               uv
+              maturin
+              just
             ];
 
             env = {
