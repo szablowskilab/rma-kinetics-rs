@@ -73,3 +73,6 @@ docs/_build/
 
 # Marimo
 __marimo__
+
+# direnv
+.direnv
