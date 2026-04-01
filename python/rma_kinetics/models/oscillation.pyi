@@ -1,8 +1,5 @@
 """
-Constitutive RMA expression model
-
-Contains `Model` class for the constitutive RMA expression model
-and `State` class for the model state.
+Oscillating RMA expression model.
 """
 
 from typing import TYPE_CHECKING
@@ -12,18 +9,22 @@ if TYPE_CHECKING:
     from ..solvers import Solver
 
 class Model:
-    """Constitutive RMA expression model"""
+    """Oscillating RMA expression model."""
+
     def __init__(
-        self, prod: float = 0.2, bbb_transport: float = 0.6, deg: float = 0.007
+        self,
+        prod: float = 0.2,
+        freq: float = 0.01,
+        bbb_transport: float = 0.6,
+        deg: float = 0.007,
     ) -> None: ...
     def solve(
         self, t0: float, tf: float, dt: float, init_state: State, solver: Solver
     ) -> Solution: ...
-    """
-    Solve model from an initial state over the given time interval.
-    """
 
 class State:
+    """Oscillation model state."""
+
     def __init__(self, brain_rma: float = 0.0, plasma_rma: float = 0.0) -> None: ...
     @property
     def brain_rma(self) -> float: ...

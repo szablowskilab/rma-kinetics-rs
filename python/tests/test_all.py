@@ -52,12 +52,12 @@ def test_constitutive_solve():
 
 
 def test_stochastic_constitutive_model_creation():
-    models.constitutive.stochastic.Model()
-    models.constitutive.stochastic.Model(0.4, 0.5, 0.005, 0.4, 0.1)  # custom rates
+    models.constitutive.StochasticModel()
+    models.constitutive.StochasticModel(0.4, 0.5, 0.005, 0.4, 0.1)  # custom rates
 
 
 def test_stochastic_constitutive_solve():
-    model = models.constitutive.stochastic.Model()
+    model = models.constitutive.StochasticModel()
     state = models.constitutive.State()
 
     # this should error since we don't pass fixed step size to rk4 solver
@@ -67,7 +67,7 @@ def test_stochastic_constitutive_solve():
     ):
         model.solve(T0, T1, DT, state, rk4)
 
-    rk_fixed = solvers.RungeKutta4(dt0=1)
+    rk_fixed = solvers.Euler(dt0=1)
     solution = model.solve(T0, T1, DT, state, rk_fixed)
     expected_shape = (T1 + 1,)
     assert solution.ts.shape == expected_shape
