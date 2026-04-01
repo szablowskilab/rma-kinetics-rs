@@ -12,8 +12,8 @@ class Model:
         rma_bbb_transport: float = 0.6,
         rma_deg: float = 0.007,
         tev_plasma_vd: float = 1.0,
-        tev_deg: float = 0.31,
-        tev_cut_rate: float = 0.34,
+        tev_deg: float = 0.1,
+        tev_cut_rate: float = 0.01,
     ) -> None: ...
     def solve(
         self, t0: float, tf: float, dt: float, init_state: State, solver: Solver
