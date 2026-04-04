@@ -1,7 +1,7 @@
 """
 RMA Kinetics Python Library
 
-Kinetic models for the released markers of activity (RMAs)
+Kinetic models for released markers of activity (RMAs)
 for constitutive or drug-induced reporter expression.
 """
 

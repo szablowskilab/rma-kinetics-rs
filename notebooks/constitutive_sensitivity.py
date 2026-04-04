@@ -152,46 +152,89 @@ def _(data_dir, mu_df, np, os, pl, plt, sb, t):
     _params = ["Production", "BBB Transport", "Degradation"]
     times = sorted(mu_df["time"].unique())
     colors = sb.color_palette("crest", n_colors=6)
+    alphas = [0.5, 1, 1]
 
     x = np.arange(len(_params))
     width = 0.2
 
-    fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
+    # fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
+    fig, ax = plt.subplots()
 
     for i, _t in enumerate(times):
         subset = mu_df.filter(pl.col("time") == _t)
 
         y = subset["mu_norm"]
         yerr = subset["conf_norm"]
-        s = subset["sigma_norm"]
+        #s = subset["sigma_norm"]
 
-        ax[0].bar(
+        plt.bar(
             x + i * width,
             y,
             width,
             label=str(t),
             yerr=yerr,
-            color=colors[i*2]
+            color=colors[i*2],
+            alpha=alphas[i]
         )
 
+        """
         ax[1].bar(
             x + i * width,
             s,
             width,
             label=str(t),
-            color=colors[i*2]
+            color=colors[i*2],
+            alpha=alphas[i]
         )
+        """
 
-    ax[0].set_xticks(x + width * (len(times) - 1) / 2)
-    ax[0].set_xticklabels(_params)
-    ax[0].set_ylabel("Relative Importance")
+    ax.set_xticks(x + width * (len(times) - 1) / 2)
+    ax.set_xticklabels(_params)
+    ax.set_ylabel("Relative Importance")
 
-    ax[1].set_xticks(x + width * (len(times) - 1) / 2)
-    ax[1].set_xticklabels(_params)
-    ax[1].set_ylabel("Relative Nonlinearity or Interaction")
+    #ax[1].set_xticks(x + width * (len(times) - 1) / 2)
+    #ax[1].set_xticklabels(_params)
+    #ax[1].set_ylabel("Relative Nonlinearity or Interaction")
 
     plt.tight_layout()
-    plt.savefig(os.path.join(data_dir, "norm_sensitivity.svg"))
+    plt.savefig(os.path.join(data_dir, "norm_importance.svg"))
+    plt.show()
+    return alphas, colors, times, width, x
+
+
+@app.cell
+def _(alphas, colors, data_dir, mu_df, os, pl, plt, t, times, width, x):
+    # sensitivity at at 1, 2, and 3 week timepoints (summary)
+    _params = ["Production", "BBB Transport", "Degradation"]
+    #times = sorted(mu_df["time"].unique())
+    #colors = sb.color_palette("crest", n_colors=6)
+    #alphas = [0.5, 1, 1]
+
+    #x = np.arange(len(_params))
+    #width = 0.2
+
+    # fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
+    _fig, _ax = plt.subplots()
+
+    for _i, _t in enumerate(times):
+        _subset = mu_df.filter(pl.col("time") == _t)
+        s = _subset["sigma_norm"]
+    
+        plt.bar(
+            x + _i * width,
+            s,
+            width,
+            label=str(t),
+            color=colors[_i*2],
+            alpha=alphas[_i]
+        )
+
+    _ax.set_xticks(x + width * (len(times) - 1) / 2)
+    _ax.set_xticklabels(_params)
+    _ax.set_ylabel("Relative Nonlinearity or Interaction")
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(data_dir, "norm_interaction.svg"))
     plt.show()
     return
 
