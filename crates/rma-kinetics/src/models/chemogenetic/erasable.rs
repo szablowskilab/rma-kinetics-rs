@@ -7,7 +7,10 @@ use differential_equations::{
 };
 
 #[cfg(feature = "py")]
-use pyo3::{PyResult, exceptions::PyValueError, pyclass, pyfunction, pymethods};
+use pyo3::{PyResult, exceptions::PyValueError, pyclass, pymethods};
+
+#[cfg(feature = "py")]
+use crate::solve::{InnerSolution, PySolution, PySolver};
 
 #[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
 use polars::{error::PolarsError, frame::DataFrame};
@@ -22,9 +25,12 @@ use super::{ChemogeneticCoreFields, diff_chemogenetic_core, saturating_mix};
 use crate::{
     SolutionAccess, Solve,
     models::{
-        cno::{CNOFields, CNOPKAccess, Dose, Model as CNOModel},
-        constitutive::erasable::Dose as TevDose,
+        cno::{CNOFields, CNOPKAccess, CnoDose, Model as CNOModel},
         dox::{DoxFields, Model as DoxModel},
+        erasable::{
+            DEFAULT_TEV_CUT_RATE, DEFAULT_TEV_DEG, DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME,
+            DEFAULT_TEV_PLASMA_VD, TevDose, TevFields,
+        },
     },
     pk::{DoseApplyingSolout, ScheduledStateUpdate, validate_unique_dose_times},
     solve::SpeciesAccessError,
@@ -119,6 +125,190 @@ impl<T: std::fmt::Display> std::fmt::Display for State<T> {
             self.brain_clz,
             self.plasma_tev,
         )
+    }
+}
+
+#[cfg(feature = "py")]
+#[pyclass(name = "State")]
+#[derive(Clone)]
+pub struct PyState {
+    pub inner: State<f64>,
+}
+
+#[cfg(feature = "py")]
+#[pymethods]
+impl PyState {
+    #[new]
+    #[pyo3(signature = (brain_rma=0., plasma_rma=0., tta=0., plasma_dox=0., brain_dox=0., dreadd=0., peritoneal_cno=0., plasma_cno=0., brain_cno=0., plasma_clz=0., brain_clz=0., plasma_tev=0.))]
+    pub fn new(
+        brain_rma: f64,
+        plasma_rma: f64,
+        tta: f64,
+        plasma_dox: f64,
+        brain_dox: f64,
+        dreadd: f64,
+        peritoneal_cno: f64,
+        plasma_cno: f64,
+        brain_cno: f64,
+        plasma_clz: f64,
+        brain_clz: f64,
+        plasma_tev: f64,
+    ) -> Self {
+        Self {
+            inner: State::new(
+                brain_rma,
+                plasma_rma,
+                tta,
+                plasma_dox,
+                brain_dox,
+                dreadd,
+                peritoneal_cno,
+                plasma_cno,
+                brain_cno,
+                plasma_clz,
+                brain_clz,
+                plasma_tev,
+            ),
+        }
+    }
+
+    #[getter]
+    fn get_brain_rma(&self) -> f64 {
+        self.inner.brain_rma
+    }
+
+    #[getter]
+    fn get_plasma_rma(&self) -> f64 {
+        self.inner.plasma_rma
+    }
+
+    #[getter]
+    fn get_tta(&self) -> f64 {
+        self.inner.tta
+    }
+
+    #[getter]
+    fn get_plasma_dox(&self) -> f64 {
+        self.inner.plasma_dox
+    }
+
+    #[getter]
+    fn get_brain_dox(&self) -> f64 {
+        self.inner.brain_dox
+    }
+
+    #[getter]
+    fn get_dreadd(&self) -> f64 {
+        self.inner.dreadd
+    }
+
+    #[getter]
+    fn get_peritoneal_cno(&self) -> f64 {
+        self.inner.peritoneal_cno
+    }
+
+    #[getter]
+    fn get_plasma_cno(&self) -> f64 {
+        self.inner.plasma_cno
+    }
+
+    #[getter]
+    fn get_brain_cno(&self) -> f64 {
+        self.inner.brain_cno
+    }
+
+    #[getter]
+    fn get_plasma_clz(&self) -> f64 {
+        self.inner.plasma_clz
+    }
+
+    #[getter]
+    fn get_brain_clz(&self) -> f64 {
+        self.inner.brain_clz
+    }
+
+    #[getter]
+    fn get_plasma_tev(&self) -> f64 {
+        self.inner.plasma_tev
+    }
+
+    #[setter]
+    fn set_brain_rma(&mut self, value: f64) -> PyResult<()> {
+        self.inner.brain_rma = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_plasma_rma(&mut self, value: f64) -> PyResult<()> {
+        self.inner.plasma_rma = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_tta(&mut self, value: f64) -> PyResult<()> {
+        self.inner.tta = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_plasma_dox(&mut self, value: f64) -> PyResult<()> {
+        self.inner.plasma_dox = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_brain_dox(&mut self, value: f64) -> PyResult<()> {
+        self.inner.brain_dox = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_dreadd(&mut self, value: f64) -> PyResult<()> {
+        self.inner.dreadd = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_peritoneal_cno(&mut self, value: f64) -> PyResult<()> {
+        self.inner.peritoneal_cno = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_plasma_cno(&mut self, value: f64) -> PyResult<()> {
+        self.inner.plasma_cno = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_brain_cno(&mut self, value: f64) -> PyResult<()> {
+        self.inner.brain_cno = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_plasma_clz(&mut self, value: f64) -> PyResult<()> {
+        self.inner.plasma_clz = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_brain_clz(&mut self, value: f64) -> PyResult<()> {
+        self.inner.brain_clz = value;
+        Ok(())
+    }
+
+    #[setter]
+    fn set_plasma_tev(&mut self, value: f64) -> PyResult<()> {
+        self.inner.plasma_tev = value;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "py")]
+impl std::fmt::Display for PyState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner)
     }
 }
 
@@ -356,6 +546,16 @@ impl ChemogeneticCoreFields for State<f64> {
     }
 }
 
+impl TevFields for State<f64> {
+    fn plasma_tev(&self) -> f64 {
+        self.plasma_tev
+    }
+
+    fn plasma_tev_mut(&mut self) -> &mut f64 {
+        &mut self.plasma_tev
+    }
+}
+
 const DEFAULT_RMA_PROD: f64 = 0.428;
 const DEFAULT_LEAKY_RMA_PROD: f64 = 7.01e-3;
 const DEFAULT_RMA_BBB_TRANSPORT: f64 = 0.727;
@@ -420,13 +620,13 @@ pub struct Model {
     pub dreadd_ec50: f64,
     #[builder(default = "DEFAULT_DREADD_COOPERATIVITY")]
     pub dreadd_cooperativity: f64,
-    // TODO: add default to builder
+    #[builder(default = "vec![TevDose::new(DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME)]")]
     pub tev_doses: Vec<TevDose>,
-    // TODO: add default to builder
+    #[builder(default = "DEFAULT_TEV_PLASMA_VD")]
     pub tev_plasma_vd: f64,
-    // TODO: add default to builder
+    #[builder(default = "DEFAULT_TEV_DEG")]
     pub tev_deg: f64,
-    // TODO: add default to builder
+    #[builder(default = "DEFAULT_TEV_CUT_RATE")]
     pub tev_cut_rate: f64,
 }
 
@@ -455,8 +655,246 @@ impl ModelBuilder {
 }
 
 impl CNOPKAccess for Model {
-    fn get_doses(&self) -> &Vec<Dose> {
+    fn get_doses(&self) -> &Vec<CnoDose> {
         &self.cno_pk_model.doses
+    }
+}
+
+#[cfg(feature = "py")]
+#[pymethods]
+impl Model {
+    #[new]
+    #[pyo3(signature = (rma_prod=DEFAULT_RMA_PROD, leaky_rma_prod=DEFAULT_LEAKY_RMA_PROD, rma_bbb_transport=DEFAULT_RMA_BBB_TRANSPORT, rma_deg=DEFAULT_RMA_DEG, tta_prod=DEFAULT_TTA_PROD, leaky_tta_prod=DEFAULT_LEAKY_TTA_PROD, tta_deg=DEFAULT_TTA_DEG, tta_kd=DEFAULT_TTA_KD, tta_cooperativity=DEFAULT_TTA_COOPERATIVITY, dox_pk_model=DoxModel::default(), dox_tta_kd=DEFAULT_DOX_TTA_KD, cno_pk_model=CNOModel::default(), cno_ec50=DEFAULT_CNO_EC50, clz_ec50=DEFAULT_CLZ_EC50, cno_cooperativity=DEFAULT_CNO_COOPERATIVITY, clz_cooperativity=DEFAULT_CLZ_COOPERATIVITY, dreadd_prod=DEFAULT_DREADD_PROD, dreadd_deg=DEFAULT_DREADD_DEG, dreadd_ec50=DEFAULT_DREADD_EC50, dreadd_cooperativity=DEFAULT_DREADD_COOPERATIVITY, tev_doses=vec![TevDose::new(DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME)], tev_plasma_vd=DEFAULT_TEV_PLASMA_VD, tev_deg=DEFAULT_TEV_DEG, tev_cut_rate=DEFAULT_TEV_CUT_RATE))]
+    pub fn create(
+        rma_prod: f64,
+        leaky_rma_prod: f64,
+        rma_bbb_transport: f64,
+        rma_deg: f64,
+        tta_prod: f64,
+        leaky_tta_prod: f64,
+        tta_deg: f64,
+        tta_kd: f64,
+        tta_cooperativity: f64,
+        dox_pk_model: DoxModel,
+        dox_tta_kd: f64,
+        cno_pk_model: CNOModel,
+        cno_ec50: f64,
+        clz_ec50: f64,
+        cno_cooperativity: f64,
+        clz_cooperativity: f64,
+        dreadd_prod: f64,
+        dreadd_deg: f64,
+        dreadd_ec50: f64,
+        dreadd_cooperativity: f64,
+        tev_doses: Vec<TevDose>,
+        tev_plasma_vd: f64,
+        tev_deg: f64,
+        tev_cut_rate: f64,
+    ) -> PyResult<Self> {
+        validate_unique_dose_times(&tev_doses).map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        Ok(Self {
+            rma_prod,
+            leaky_rma_prod,
+            rma_bbb_transport,
+            rma_deg,
+            tta_prod,
+            leaky_tta_prod,
+            tta_deg,
+            tta_kd,
+            tta_cooperativity,
+            dox_pk_model,
+            dox_tta_kd,
+            cno_pk_model,
+            cno_ec50,
+            clz_ec50,
+            cno_cooperativity,
+            clz_cooperativity,
+            dreadd_prod,
+            dreadd_deg,
+            dreadd_ec50,
+            dreadd_cooperativity,
+            tev_doses,
+            tev_plasma_vd,
+            tev_deg,
+            tev_cut_rate,
+        })
+    }
+
+    #[pyo3(name = "solve")]
+    fn py_solve(
+        &self,
+        t0: f64,
+        tf: f64,
+        dt: f64,
+        init_state: PyState,
+        solver: PySolver,
+    ) -> PyResult<PySolution> {
+        let result = match solver.solver_type.as_str() {
+            "dopri5" => {
+                let mut solver_instance =
+                    differential_equations::methods::ExplicitRungeKutta::dopri5()
+                        .rtol(solver.rtol)
+                        .atol(solver.atol)
+                        .h0(solver.dt0)
+                        .h_min(solver.min_dt)
+                        .h_max(solver.max_dt)
+                        .max_steps(solver.max_steps)
+                        .max_rejects(solver.max_rejected_steps)
+                        .safety_factor(solver.safety_factor)
+                        .min_scale(solver.min_scale)
+                        .max_scale(solver.max_scale);
+                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+            }
+            "kvaerno3" => {
+                let mut solver_instance =
+                    differential_equations::methods::DiagonallyImplicitRungeKutta::kvaerno423()
+                        .rtol(solver.rtol)
+                        .atol(solver.atol)
+                        .h0(solver.dt0)
+                        .h_min(solver.min_dt)
+                        .h_max(solver.max_dt)
+                        .max_steps(solver.max_steps)
+                        .max_rejects(solver.max_rejected_steps)
+                        .safety_factor(solver.safety_factor)
+                        .min_scale(solver.min_scale)
+                        .max_scale(solver.max_scale);
+                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+            }
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Solver '{}' not supported",
+                    solver.solver_type
+                )));
+            }
+        };
+
+        match result {
+            Ok(solution) => Ok(PySolution {
+                inner: InnerSolution::ChemogeneticErasable(solution),
+            }),
+            Err(e) => Err(PyValueError::new_err(format!("Failed to solve: {:?}", e))),
+        }
+    }
+
+    #[getter]
+    fn get_rma_prod(&self) -> f64 {
+        self.rma_prod
+    }
+
+    #[getter]
+    fn get_leaky_rma_prod(&self) -> f64 {
+        self.leaky_rma_prod
+    }
+
+    #[getter]
+    fn get_rma_bbb_transport(&self) -> f64 {
+        self.rma_bbb_transport
+    }
+
+    #[getter]
+    fn get_rma_deg(&self) -> f64 {
+        self.rma_deg
+    }
+
+    #[getter]
+    fn get_tta_prod(&self) -> f64 {
+        self.tta_prod
+    }
+
+    #[getter]
+    fn get_leaky_tta_prod(&self) -> f64 {
+        self.leaky_tta_prod
+    }
+
+    #[getter]
+    fn get_tta_deg(&self) -> f64 {
+        self.tta_deg
+    }
+
+    #[getter]
+    fn get_tta_kd(&self) -> f64 {
+        self.tta_kd
+    }
+
+    #[getter]
+    fn get_tta_cooperativity(&self) -> f64 {
+        self.tta_cooperativity
+    }
+
+    #[getter]
+    fn get_dox_pk_model(&self) -> DoxModel {
+        self.dox_pk_model.clone()
+    }
+
+    #[getter]
+    fn get_dox_tta_kd(&self) -> f64 {
+        self.dox_tta_kd
+    }
+
+    #[getter]
+    fn get_cno_pk_model(&self) -> CNOModel {
+        self.cno_pk_model.clone()
+    }
+
+    #[getter]
+    fn get_cno_ec50(&self) -> f64 {
+        self.cno_ec50
+    }
+
+    #[getter]
+    fn get_clz_ec50(&self) -> f64 {
+        self.clz_ec50
+    }
+
+    #[getter]
+    fn get_cno_cooperativity(&self) -> f64 {
+        self.cno_cooperativity
+    }
+
+    #[getter]
+    fn get_clz_cooperativity(&self) -> f64 {
+        self.clz_cooperativity
+    }
+
+    #[getter]
+    fn get_dreadd_prod(&self) -> f64 {
+        self.dreadd_prod
+    }
+
+    #[getter]
+    fn get_dreadd_deg(&self) -> f64 {
+        self.dreadd_deg
+    }
+
+    #[getter]
+    fn get_dreadd_ec50(&self) -> f64 {
+        self.dreadd_ec50
+    }
+
+    #[getter]
+    fn get_dreadd_cooperativity(&self) -> f64 {
+        self.dreadd_cooperativity
+    }
+
+    #[getter]
+    fn get_tev_doses(&self) -> Vec<TevDose> {
+        self.tev_doses.clone()
+    }
+
+    #[getter]
+    fn get_tev_plasma_vd(&self) -> f64 {
+        self.tev_plasma_vd
+    }
+
+    #[getter]
+    fn get_tev_deg(&self) -> f64 {
+        self.tev_deg
+    }
+
+    #[getter]
+    fn get_tev_cut_rate(&self) -> f64 {
+        self.tev_cut_rate
     }
 }
 
@@ -497,7 +935,7 @@ impl ODE<f64, State<f64>> for Model {
 
 #[derive(Clone)]
 enum ScheduledUpdate {
-    Cno(Dose),
+    Cno(CnoDose),
     Tev(TevDose),
 }
 
@@ -600,7 +1038,7 @@ mod tests {
 
     #[test]
     fn simultaneous_cno_and_tev_update() {
-        let cno_dose = Dose::new(0.03, 4.);
+        let cno_dose = CnoDose::new(0.03, 4.);
         let tev_dose = TevDose::new(20., 4.);
 
         let cno_pk_model = CNOModel::builder().doses(vec![cno_dose]).build().unwrap();

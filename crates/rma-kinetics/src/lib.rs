@@ -34,6 +34,7 @@
 //! The returned solution is the [`Solution`](https://docs.rs/differential-equations/latest/differential_equations/solution/struct.Solution.html)
 //! struct from the `differential_equations` crate, where the `y` field is the corresponding `State` struct.
 
+pub mod inference;
 pub mod models;
 pub mod pk;
 mod solve;
@@ -50,6 +51,8 @@ use pyo3::prelude::*;
 #[cfg(feature = "py")]
 #[pymodule]
 mod _rma_kinetics {
+    #[pymodule_export]
+    use super::py_inference;
     #[pymodule_export]
     use super::py_models;
     #[pymodule_export]
@@ -69,14 +72,38 @@ mod py_models {
     #[pymodule_export]
     use super::py_dox;
     #[pymodule_export]
+    use super::py_erasable;
+    #[pymodule_export]
     use super::py_oscillation;
     #[pymodule_export]
     use super::py_tetoff;
 }
 
+/// Inference Python module
+#[cfg(feature = "py")]
+#[pymodule(submodule, name = "inference")]
+mod py_inference {
+    #[pymodule_export]
+    use super::py_inference_constitutive;
+}
+
+/// Constitutive inference Python module
+#[cfg(feature = "py")]
+#[pymodule(submodule, name = "constitutive")]
+mod py_inference_constitutive {
+    #[pymodule_export]
+    use super::models::constitutive::inference::PyConstitutiveInferenceData;
+    #[pymodule_export]
+    use super::models::constitutive::inference::PyConstitutivePosterior;
+    #[pymodule_export]
+    use super::models::constitutive::inference::PyConstitutiveSampleStats;
+    #[pymodule_export]
+    use super::models::constitutive::inference::py_sample_constitutive;
+}
+
 /// Constitutive model Python module
 #[cfg(feature = "py")]
-#[pymodule(name = "constitutive")]
+#[pymodule(submodule, name = "constitutive")]
 mod py_constitutive {
     #[pymodule_export]
     use super::models::constitutive::Model;
@@ -90,12 +117,8 @@ mod py_constitutive {
 
 /// Constitutive erasable model Python module
 #[cfg(feature = "py")]
-#[pymodule(name = "erasable")]
+#[pymodule(submodule, name = "erasable")]
 mod py_constitutive_erasable {
-    #[pymodule_export]
-    use super::models::constitutive::erasable::create_tev_schedule;
-    #[pymodule_export]
-    use super::models::constitutive::erasable::Dose;
     #[pymodule_export]
     use super::models::constitutive::erasable::Model;
     #[pymodule_export]
@@ -104,7 +127,7 @@ mod py_constitutive_erasable {
 
 /// Oscillation model Python module
 #[cfg(feature = "py")]
-#[pymodule(name = "oscillation")]
+#[pymodule(submodule, name = "oscillation")]
 mod py_oscillation {
     #[pymodule_export]
     use super::models::oscillation::Model;
@@ -114,7 +137,7 @@ mod py_oscillation {
 
 /// TetOff model python module
 #[cfg(feature = "py")]
-#[pymodule(name = "tetoff")]
+#[pymodule(submodule, name = "tetoff")]
 mod py_tetoff {
     #[pymodule_export]
     use super::models::tetoff::Model;
@@ -124,38 +147,62 @@ mod py_tetoff {
 
 // Dox model python module
 #[cfg(feature = "py")]
-#[pymodule(name = "dox")]
+#[pymodule(submodule, name = "dox")]
 mod py_dox {
-    #[pymodule_export]
-    use super::models::dox::create_dox_schedule;
     #[pymodule_export]
     use super::models::dox::AccessPeriod;
     #[pymodule_export]
     use super::models::dox::Model;
     #[pymodule_export]
     use super::models::dox::PyState;
+    #[pymodule_export]
+    use super::models::dox::create_dox_schedule;
 }
 
 // CNO model python module
 #[cfg(feature = "py")]
-#[pymodule(name = "cno")]
+#[pymodule(submodule, name = "cno")]
 mod py_cno {
     #[pymodule_export]
-    use super::models::cno::create_cno_schedule;
-    #[pymodule_export]
-    use super::models::cno::Dose;
+    use super::models::cno::CnoDose;
     #[pymodule_export]
     use super::models::cno::Model;
     #[pymodule_export]
     use super::models::cno::PyState;
+    #[pymodule_export]
+    use super::models::cno::create_cno_schedule;
+}
+
+// Shared erasable helpers python module
+#[cfg(feature = "py")]
+#[pymodule(submodule, name = "erasable")]
+mod py_erasable {
+    #[pymodule_export]
+    use super::models::erasable::TevDose;
+    #[pymodule_export]
+    use super::models::erasable::create_tev_schedule;
 }
 
 // Chemogenetic model python module
 #[cfg(feature = "py")]
-#[pymodule(name = "chemogenetic")]
+#[pymodule(submodule, name = "chemogenetic")]
 mod py_chemogenetic {
     #[pymodule_export]
     use super::models::chemogenetic::Model;
     #[pymodule_export]
     use super::models::chemogenetic::PyState;
+    #[pymodule_export]
+    use super::models::chemogenetic::SensitivityEngine;
+    #[pymodule_export]
+    use super::py_chemogenetic_erasable;
+}
+
+/// Chemogenetic erasable model python module
+#[cfg(feature = "py")]
+#[pymodule(submodule, name = "erasable")]
+mod py_chemogenetic_erasable {
+    #[pymodule_export]
+    use super::models::chemogenetic::erasable::Model;
+    #[pymodule_export]
+    use super::models::chemogenetic::erasable::PyState;
 }

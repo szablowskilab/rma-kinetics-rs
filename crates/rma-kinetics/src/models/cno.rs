@@ -6,13 +6,13 @@
 //! ## Usage
 //!
 //! CNO is assumed to be administered via bolus injection.
-//! To set the administration schedule, see the [`Dose`] struct and the [`create_cno_schedule`] function.
+//! To set the administration schedule, see the [`CnoDose`] struct and the [`create_cno_schedule`] function.
 //!
 //! ```rust
 //! use rma_kinetics::{models::cno, Solve};
 //! use differential_equations::methods::ExplicitRungeKutta;
 //!
-//! let dose = cno::Dose::new(0.03, 0.);
+//! let dose = cno::CnoDose::new(0.03, 0.);
 //! let model = cno::Model::builder().doses(vec![dose]).build()?;
 //! let init_state = cno::State::zeros();
 //! let mut solver = ExplicitRungeKutta::dopri5();
@@ -54,24 +54,24 @@ const CNO_MW: f64 = 342.8; // g/mol
 
 /// Defines a CNO dose given an amount in mg and administration time.
 /// Assumes this is an instantaneous injection.
-#[cfg_attr(feature = "py", pyclass)]
+#[cfg_attr(feature = "py", pyclass(name = "CnoDose"))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
-pub struct Dose {
+pub struct CnoDose {
     pub mg: f64,
     pub nmol: f64,
     pub time: f64,
 }
 
-impl Dose {
-    /// Create a new `Dose` given an amount in mg and administration time.
+impl CnoDose {
+    /// Create a new `CnoDose` given an amount in mg and administration time.
     pub fn new(mg: f64, time: f64) -> Self {
         let nmol = mg / CNO_MW * 1e6;
         Self { mg, nmol, time }
     }
 }
 
-impl ScheduledDose for Dose {
+impl ScheduledDose for CnoDose {
     fn time(&self) -> f64 {
         self.time
     }
@@ -81,20 +81,20 @@ impl ScheduledDose for Dose {
     }
 }
 
-impl ScheduledStateUpdate<State<f64>> for Dose {
+impl<S: CNOFields> ScheduledStateUpdate<S> for CnoDose {
     fn time(&self) -> f64 {
         self.time
     }
 
-    fn apply(&self, state: &mut State<f64>) {
-        state.peritoneal_cno += self.nmol;
+    fn apply(&self, state: &mut S) {
+        *state.peritoneal_cno_mut() += self.nmol;
     }
 }
 
 #[cfg(feature = "py")]
 #[pymethods]
-impl Dose {
-    /// Create a new `Dose` given an amount in mg and administration time.
+impl CnoDose {
+    /// Create a new `CnoDose` given an amount in mg and administration time.
     #[new]
     pub fn create(mg: f64, time: f64) -> Self {
         Self::new(mg, time)
@@ -149,13 +149,13 @@ pub fn create_cno_schedule(
     start_time: f64,
     repeat: Option<usize>,
     interval: Option<f64>,
-) -> Vec<Dose> {
+) -> Vec<CnoDose> {
     let mut schedule = Vec::new();
     let mut current_time = start_time;
     let interval = interval.unwrap_or(0.);
 
     for _ in 0..repeat.unwrap_or(0) + 1 {
-        schedule.push(Dose::new(mg, current_time));
+        schedule.push(CnoDose::new(mg, current_time));
         current_time += interval;
     }
     schedule
@@ -489,7 +489,7 @@ impl CNOFields for State<f64> {
 /// This enables models to access doses either directly (cno::Model)
 /// or indirectly through a nested CNO PK model (chemogenetic::Model).
 pub trait CNOPKAccess {
-    fn get_doses(&self) -> &Vec<Dose>;
+    fn get_doses(&self) -> &Vec<CnoDose>;
 }
 
 const DEFAULT_DOSE: f64 = 0.03;
@@ -514,8 +514,8 @@ const DEFAULT_CLZ_BRAIN_VD: f64 = 8.87e-2;
 #[derive(Debug, Clone, Builder)]
 #[builder(derive(Debug), build_fn(validate = "Self::validate"))]
 pub struct Model {
-    #[builder(default = "vec![Dose::new(DEFAULT_DOSE, DEFAULT_DOSE_TIME)]")]
-    pub doses: Vec<Dose>,
+    #[builder(default = "vec![CnoDose::new(DEFAULT_DOSE, DEFAULT_DOSE_TIME)]")]
+    pub doses: Vec<CnoDose>,
     #[builder(default = "DEFAULT_CNO_ABSORPTION")]
     pub cno_absorption: f64,
     #[builder(default = "DEFAULT_CNO_ELIMINATION")]
@@ -597,7 +597,7 @@ impl ModelBuilder {
 }
 
 impl CNOPKAccess for Model {
-    fn get_doses(&self) -> &Vec<Dose> {
+    fn get_doses(&self) -> &Vec<CnoDose> {
         &self.doses
     }
 }
@@ -635,10 +635,10 @@ impl Solve for Model {
                     Some(dose.clone())
                 }
             })
-            .collect::<Vec<Dose>>();
+            .collect::<Vec<CnoDose>>();
 
         let mut dosing_solout =
-            DoseApplyingSolout::<State<f64>, Dose>::new(scheduled_updates, t0, tf, dt);
+            DoseApplyingSolout::<State<f64>, CnoDose>::new(scheduled_updates, t0, tf, dt);
         let problem = ODEProblem::new(self, t0, tf, adjusted_init_state);
         let mut solution = problem.solout(&mut dosing_solout).solve(solver)?;
 
@@ -664,9 +664,9 @@ impl Solve for Model {
 #[pymethods]
 impl Model {
     #[new]
-    #[pyo3(signature = (doses=vec![Dose::new(DEFAULT_DOSE, DEFAULT_DOSE_TIME)], cno_absorption=DEFAULT_CNO_ABSORPTION, cno_elimination=DEFAULT_CNO_ELIMINATION, cno_reverse_metabolism=DEFAULT_CNO_REVERSE_METABOLISM, clz_metabolism=DEFAULT_CLZ_METABOLISM, clz_elimination=DEFAULT_CLZ_ELIMINATION, cno_brain_transport=DEFAULT_CNO_BRAIN_TRANSPORT, cno_plasma_transport=DEFAULT_CNO_PLASMA_TRANSPORT, clz_brain_transport=DEFAULT_CLZ_BRAIN_TRANSPORT, clz_plasma_transport=DEFAULT_CLZ_PLASMA_TRANSPORT, cno_plasma_vd=DEFAULT_CNO_PLASMA_VD, cno_brain_vd=DEFAULT_CNO_BRAIN_VD, clz_plasma_vd=DEFAULT_CLZ_PLASMA_VD, clz_brain_vd=DEFAULT_CLZ_BRAIN_VD))]
+    #[pyo3(signature = (doses=vec![CnoDose::new(DEFAULT_DOSE, DEFAULT_DOSE_TIME)], cno_absorption=DEFAULT_CNO_ABSORPTION, cno_elimination=DEFAULT_CNO_ELIMINATION, cno_reverse_metabolism=DEFAULT_CNO_REVERSE_METABOLISM, clz_metabolism=DEFAULT_CLZ_METABOLISM, clz_elimination=DEFAULT_CLZ_ELIMINATION, cno_brain_transport=DEFAULT_CNO_BRAIN_TRANSPORT, cno_plasma_transport=DEFAULT_CNO_PLASMA_TRANSPORT, clz_brain_transport=DEFAULT_CLZ_BRAIN_TRANSPORT, clz_plasma_transport=DEFAULT_CLZ_PLASMA_TRANSPORT, cno_plasma_vd=DEFAULT_CNO_PLASMA_VD, cno_brain_vd=DEFAULT_CNO_BRAIN_VD, clz_plasma_vd=DEFAULT_CLZ_PLASMA_VD, clz_brain_vd=DEFAULT_CLZ_BRAIN_VD))]
     pub fn create(
-        doses: Vec<Dose>,
+        doses: Vec<CnoDose>,
         cno_absorption: f64,
         cno_elimination: f64,
         cno_reverse_metabolism: f64,
@@ -758,7 +758,7 @@ impl Model {
     }
 
     #[getter]
-    fn get_doses(&self) -> Vec<Dose> {
+    fn get_doses(&self) -> Vec<CnoDose> {
         self.doses.clone()
     }
     #[getter]
@@ -814,7 +814,7 @@ impl Model {
         self.clz_brain_vd
     }
     #[setter]
-    fn set_doses(&mut self, doses: Vec<Dose>) -> PyResult<()> {
+    fn set_doses(&mut self, doses: Vec<CnoDose>) -> PyResult<()> {
         self.doses = doses;
         Ok(())
     }
@@ -892,7 +892,7 @@ mod tests {
 
     #[test]
     fn cno_dose_creation() {
-        let single_dose = Dose::new(0.03, 0.);
+        let single_dose = CnoDose::new(0.03, 0.);
         assert_eq!(single_dose.mg, 0.03);
         assert_eq!(single_dose.nmol, 0.03 / CNO_MW * 1e6);
         assert_eq!(single_dose.time, 0.);
@@ -948,7 +948,7 @@ mod tests {
         assert_eq!(default_model.cno_absorption, DEFAULT_CNO_ABSORPTION);
         assert_eq!(default_model.cno_elimination, DEFAULT_CNO_ELIMINATION);
 
-        let dose = Dose::new(0.03, 0.);
+        let dose = CnoDose::new(0.03, 0.);
         let model_with_dose = Model::builder().doses(vec![dose]).build()?;
         assert_eq!(model_with_dose.doses.len(), 1);
         assert_eq!(model_with_dose.doses[0].mg, 0.03);
@@ -963,7 +963,7 @@ mod tests {
 
     #[test]
     fn cno_model_rejects_duplicate_nonzero_dose_times() {
-        let duplicate_doses = vec![Dose::new(0.03, 1.), Dose::new(0.05, 1.)];
+        let duplicate_doses = vec![CnoDose::new(0.03, 1.), CnoDose::new(0.05, 1.)];
         let result = Model::builder().doses(duplicate_doses).build();
 
         assert!(result.is_err());
@@ -987,7 +987,7 @@ mod tests {
         assert!(solution.y[0].peritoneal_cno > 0.);
 
         // apply dose at t=1
-        let dose = Dose::new(0.03, 1.);
+        let dose = CnoDose::new(0.03, 1.);
         let custom_model = Model::builder().doses(vec![dose.clone()]).build()?;
         let solution = custom_model.solve(t0, tf, dt, init_state, &mut solver);
 
@@ -1007,7 +1007,9 @@ mod tests {
 
     #[test]
     fn small_dt() -> Result<(), Box<dyn std::error::Error>> {
-        let model = Model::builder().doses(vec![Dose::new(0.03, 1.)]).build()?;
+        let model = Model::builder()
+            .doses(vec![CnoDose::new(0.03, 1.)])
+            .build()?;
         let mut solver = ExplicitRungeKutta::dopri5();
         let init_state = State::zeros();
 
@@ -1018,7 +1020,9 @@ mod tests {
 
     #[test]
     fn expected_ts() -> Result<(), Box<dyn std::error::Error>> {
-        let model = Model::builder().doses(vec![Dose::new(0.03, 1.)]).build()?;
+        let model = Model::builder()
+            .doses(vec![CnoDose::new(0.03, 1.)])
+            .build()?;
         let dt = 1.;
         let t0 = 0.;
         let tf = 10.;
@@ -1033,7 +1037,9 @@ mod tests {
         assert_eq!(solution.y.len(), expected_len);
         println!("{:?}", solution.t);
 
-        let model = Model::builder().doses(vec![Dose::new(0.03, 1.5)]).build()?;
+        let model = Model::builder()
+            .doses(vec![CnoDose::new(0.03, 1.5)])
+            .build()?;
         let solution = model.solve(t0, tf, dt, init_state, &mut solver);
         assert!(solution.is_ok());
         let solution = solution.unwrap();
@@ -1055,7 +1061,7 @@ mod tests {
         let mut solver = ExplicitRungeKutta::dopri5();
         let init_state = State::zeros();
         let model = Model::builder()
-            .doses(vec![Dose::new(0.03, 1.5)])
+            .doses(vec![CnoDose::new(0.03, 1.5)])
             .build()
             .unwrap();
 

@@ -1,6 +1,10 @@
 use crate::{
     SolutionAccess, Solve,
-    pk::{DoseApplyingSolout, ScheduledDose, ScheduledStateUpdate, validate_unique_dose_times},
+    models::erasable::{
+        DEFAULT_TEV_CUT_RATE, DEFAULT_TEV_DEG, DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME,
+        DEFAULT_TEV_PLASMA_VD, TevFields,
+    },
+    pk::{DoseApplyingSolout, validate_unique_dose_times},
     solve::SpeciesAccessError,
 };
 use derive_builder::Builder;
@@ -12,7 +16,7 @@ use differential_equations::{
 };
 
 #[cfg(feature = "py")]
-use pyo3::{PyResult, exceptions::PyValueError, pyclass, pyfunction, pymethods};
+use pyo3::{PyResult, exceptions::PyValueError, pyclass, pymethods};
 
 #[cfg(feature = "py")]
 use crate::solve::{InnerSolution, PySolution, PySolver};
@@ -20,96 +24,7 @@ use crate::solve::{InnerSolution, PySolution, PySolver};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Defines a TEV dose in nmol and administration time.
-#[cfg_attr(feature = "py", pyclass)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
-pub struct Dose {
-    pub nmol: f64,
-    pub time: f64,
-}
-
-impl Dose {
-    pub fn new(nmol: f64, time: f64) -> Self {
-        Self { nmol, time }
-    }
-}
-
-impl ScheduledDose for Dose {
-    fn time(&self) -> f64 {
-        self.time
-    }
-
-    fn amount(&self) -> f64 {
-        self.nmol
-    }
-}
-
-impl ScheduledStateUpdate<State<f64>> for Dose {
-    fn time(&self) -> f64 {
-        self.time
-    }
-
-    fn apply(&self, state: &mut State<f64>) {
-        state.plasma_tev += self.nmol;
-    }
-}
-
-#[cfg(feature = "py")]
-#[pymethods]
-impl Dose {
-    #[new]
-    pub fn create(nmol: f64, time: f64) -> Self {
-        Self::new(nmol, time)
-    }
-
-    #[getter]
-    pub fn get_nmol(&self) -> f64 {
-        self.nmol
-    }
-
-    #[getter]
-    pub fn get_time(&self) -> f64 {
-        self.time
-    }
-
-    #[setter]
-    pub fn set_nmol(&mut self, nmol: f64) -> PyResult<()> {
-        self.nmol = nmol;
-        Ok(())
-    }
-
-    #[setter]
-    pub fn set_time(&mut self, time: f64) -> PyResult<()> {
-        self.time = time;
-        Ok(())
-    }
-}
-
-/// Create a TEV schedule given an amount in nmol, start time, number of repeats,
-/// and interval between administrations.
-#[cfg_attr(feature = "py", pyfunction)]
-#[cfg_attr(
-    feature = "py",
-    pyo3(signature = (nmol, start_time, repeat=None, interval=None))
-)]
-pub fn create_tev_schedule(
-    nmol: f64,
-    start_time: f64,
-    repeat: Option<usize>,
-    interval: Option<f64>,
-) -> Vec<Dose> {
-    let mut schedule = Vec::new();
-    let mut current_time = start_time;
-    let interval = interval.unwrap_or(0.);
-
-    for _ in 0..repeat.unwrap_or(0) + 1 {
-        schedule.push(Dose::new(nmol, current_time));
-        current_time += interval;
-    }
-
-    schedule
-}
+pub use crate::models::erasable::{TevDose, create_tev_schedule};
 
 /// Constitutive erasable model state.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -329,11 +244,6 @@ impl SolutionAccess for Solution<f64, State<f64>> {
 const DEFAULT_PROD: f64 = 0.2;
 const DEFAULT_BBB_TRANSPORT: f64 = 0.6;
 const DEFAULT_DEG: f64 = 0.007;
-const DEFAULT_TEV_DOSE_NMOL: f64 = 0.;
-const DEFAULT_TEV_DOSE_TIME: f64 = 0.;
-const DEFAULT_TEV_PLASMA_VD: f64 = 1.;
-const DEFAULT_TEV_DEG: f64 = 0.1;
-const DEFAULT_TEV_CUT_RATE: f64 = 0.01;
 
 #[cfg_attr(feature = "py", pyclass)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -350,8 +260,8 @@ pub struct Model {
     #[builder(default = "DEFAULT_DEG")]
     pub rma_deg: f64,
     /// TEV administration schedule in plasma (nmol bolus doses).
-    #[builder(default = "vec![Dose::new(DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME)]")]
-    pub doses: Vec<Dose>,
+    #[builder(default = "vec![TevDose::new(DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME)]")]
+    pub doses: Vec<TevDose>,
     /// TEV plasma volume of distribution used for converting amount to concentration.
     #[builder(default = "DEFAULT_TEV_PLASMA_VD")]
     pub tev_plasma_vd: f64,
@@ -389,9 +299,9 @@ impl ModelBuilder {
 #[pymethods]
 impl Model {
     #[new]
-    #[pyo3(signature = (doses=vec![Dose::new(DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME)], rma_prod=DEFAULT_PROD, rma_bbb_transport=DEFAULT_BBB_TRANSPORT, rma_deg=DEFAULT_DEG, tev_plasma_vd=DEFAULT_TEV_PLASMA_VD, tev_deg=DEFAULT_TEV_DEG, tev_cut_rate=DEFAULT_TEV_CUT_RATE))]
+    #[pyo3(signature = (doses=vec![TevDose::new(DEFAULT_TEV_DOSE_NMOL, DEFAULT_TEV_DOSE_TIME)], rma_prod=DEFAULT_PROD, rma_bbb_transport=DEFAULT_BBB_TRANSPORT, rma_deg=DEFAULT_DEG, tev_plasma_vd=DEFAULT_TEV_PLASMA_VD, tev_deg=DEFAULT_TEV_DEG, tev_cut_rate=DEFAULT_TEV_CUT_RATE))]
     pub fn create(
-        doses: Vec<Dose>,
+        doses: Vec<TevDose>,
         rma_prod: f64,
         rma_bbb_transport: f64,
         rma_deg: f64,
@@ -469,12 +379,12 @@ impl Model {
     }
 
     #[getter]
-    fn get_doses(&self) -> Vec<Dose> {
+    fn get_doses(&self) -> Vec<TevDose> {
         self.doses.clone()
     }
 
     #[setter]
-    fn set_doses(&mut self, doses: Vec<Dose>) -> PyResult<()> {
+    fn set_doses(&mut self, doses: Vec<TevDose>) -> PyResult<()> {
         self.doses = doses;
         Ok(())
     }
@@ -491,6 +401,16 @@ impl ODE<f64, State<f64>> for Model {
         dydt.brain_rma = self.rma_prod - brain_efflux;
         dydt.plasma_rma = brain_efflux - (self.rma_deg * y.plasma_rma) - cleaved_rma;
         dydt.plasma_tev = -(self.tev_deg * y.plasma_tev);
+    }
+}
+
+impl TevFields for State<f64> {
+    fn plasma_tev(&self) -> f64 {
+        self.plasma_tev
+    }
+
+    fn plasma_tev_mut(&mut self) -> &mut f64 {
+        &mut self.plasma_tev
     }
 }
 
@@ -520,10 +440,10 @@ impl Solve for Model {
                     Some(dose.clone())
                 }
             })
-            .collect::<Vec<Dose>>();
+            .collect::<Vec<TevDose>>();
 
         let mut dosing_solout =
-            DoseApplyingSolout::<State<f64>, Dose>::new(scheduled_updates, t0, tf, dt);
+            DoseApplyingSolout::<State<f64>, TevDose>::new(scheduled_updates, t0, tf, dt);
 
         let problem = ODEProblem::new(self, t0, tf, adjusted_init_state);
         let mut solution = problem.solout(&mut dosing_solout).solve(solver)?;
@@ -551,7 +471,7 @@ mod tests {
 
     #[test]
     fn tev_dose_creation() {
-        let dose = Dose::new(20., 4.);
+        let dose = TevDose::new(20., 4.);
         assert_eq!(dose.nmol, 20.);
         assert_eq!(dose.time, 4.);
 
@@ -570,7 +490,7 @@ mod tests {
         let dt = 1.;
         let init_state = State::zeros();
 
-        let dose = Dose::new(10., 1.);
+        let dose = TevDose::new(10., 1.);
         let model = Model::builder()
             .doses(vec![dose.clone()])
             .tev_plasma_vd(2.)
@@ -587,7 +507,9 @@ mod tests {
 
     #[test]
     fn expected_ts() -> Result<(), Box<dyn std::error::Error>> {
-        let model = Model::builder().doses(vec![Dose::new(10., 1.)]).build()?;
+        let model = Model::builder()
+            .doses(vec![TevDose::new(10., 1.)])
+            .build()?;
         let dt = 1.;
         let t0 = 0.;
         let tf = 10.;
@@ -599,7 +521,9 @@ mod tests {
         let expected_len = ((tf - t0) / dt).ceil() as usize + 1;
         assert_eq!(solution.y.len(), expected_len);
 
-        let model = Model::builder().doses(vec![Dose::new(10., 1.5)]).build()?;
+        let model = Model::builder()
+            .doses(vec![TevDose::new(10., 1.5)])
+            .build()?;
         let solution = model.solve(t0, tf, dt, init_state, &mut solver)?;
         assert!(matches!(solution.status, Status::Complete));
         let uneven_expected_len = ((tf - t0) / dt).ceil() as usize + 2;
@@ -613,7 +537,7 @@ mod tests {
     #[test]
     fn t0_dose_is_preapplied() -> Result<(), Box<dyn std::error::Error>> {
         let model = Model::builder()
-            .doses(vec![Dose::new(12., 0.)])
+            .doses(vec![TevDose::new(12., 0.)])
             .tev_plasma_vd(3.)
             .build()?;
         let mut solver = ExplicitRungeKutta::dopri5();
@@ -627,7 +551,7 @@ mod tests {
 
     #[test]
     fn erasable_model_rejects_duplicate_nonzero_dose_times() {
-        let duplicate_doses = vec![Dose::new(10., 1.), Dose::new(20., 1.)];
+        let duplicate_doses = vec![TevDose::new(10., 1.), TevDose::new(20., 1.)];
         let result = Model::builder().doses(duplicate_doses).build();
 
         assert!(result.is_err());

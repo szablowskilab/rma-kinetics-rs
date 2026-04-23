@@ -14,7 +14,7 @@
 //! use rma_kinetics::{models::{chemogenetic, cno}, Solve};
 //! use differential_equations::methods::ExplicitRungeKutta;
 //!
-//! let dose = cno::Dose::new(0.03, 0.);
+//! let dose = cno::CnoDose::new(0.03, 0.);
 //! let cno_pk = cno::Model::builder().doses(vec![dose]).build()?;
 //! let model = chemogenetic::Model::builder().cno_pk_model(cno_pk).build()?;
 //! let init_state = chemogenetic::State::zeros();
@@ -30,10 +30,10 @@ pub mod erasable;
 use crate::{
     SolutionAccess, Solve,
     models::{
-        cno::{CNOFields, CNOPKAccess, Dose, Model as CNOModel},
+        cno::{CNOFields, CNOPKAccess, CnoDose, Model as CNOModel},
         dox::{DoxFields, Model as DoxModel},
     },
-    pk::{DoseApplyingSolout, ScheduledStateUpdate},
+    pk::DoseApplyingSolout,
     solve::SpeciesAccessError,
 };
 
@@ -543,16 +543,6 @@ impl ChemogeneticCoreFields for State<f64> {
     }
 }
 
-impl ScheduledStateUpdate<State<f64>> for Dose {
-    fn time(&self) -> f64 {
-        self.time
-    }
-
-    fn apply(&self, state: &mut State<f64>) {
-        state.peritoneal_cno += self.nmol;
-    }
-}
-
 const DEFAULT_RMA_PROD: f64 = 0.428;
 const DEFAULT_LEAKY_RMA_PROD: f64 = 7.01e-3;
 const DEFAULT_RMA_BBB_TRANSPORT: f64 = 0.727;
@@ -626,7 +616,7 @@ impl Default for Model {
 }
 
 impl CNOPKAccess for Model {
-    fn get_doses(&self) -> &Vec<Dose> {
+    fn get_doses(&self) -> &Vec<CnoDose> {
         &self.cno_pk_model.doses
     }
 }
@@ -753,10 +743,10 @@ impl Solve for Model {
                     Some(dose.clone())
                 }
             })
-            .collect::<Vec<Dose>>();
+            .collect::<Vec<CnoDose>>();
 
         let mut dosing_solout =
-            DoseApplyingSolout::<State<f64>, Dose>::new(scheduled_updates, t0, tf, dt);
+            DoseApplyingSolout::<State<f64>, CnoDose>::new(scheduled_updates, t0, tf, dt);
         let problem = ODEProblem::new(self, t0, tf, adjusted_init_state);
         let mut solution = problem.solout(&mut dosing_solout).solve(solver)?;
 
