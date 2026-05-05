@@ -287,8 +287,7 @@ dependencies = [
 [[package]]
 name = "differential-equations"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecfe5214a19f8ba4a54eaefd17cb0e8a741c09044f431bb304a983f18a0cc913"
+source = "git+https://github.com/Ryan-D-Gast/differential-equations?branch=master#923a498976e6e694c564dccd66f2f15ad70d6c5d"
 dependencies = [
  "differential-equations-derive",
  "nalgebra",

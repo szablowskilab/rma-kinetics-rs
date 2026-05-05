@@ -15,9 +15,9 @@
 //! let dose = cno::CnoDose::new(0.03, 0.);
 //! let model = cno::Model::builder().doses(vec![dose]).build()?;
 //! let init_state = cno::State::zeros();
-//! let mut solver = ExplicitRungeKutta::dopri5();
+//! let solver = ExplicitRungeKutta::dopri5();
 //!
-//! let solution = model.solve(0., 48., 1., init_state, &mut solver);
+//! let solution = model.solve(0., 48., 1., init_state, solver);
 //! assert!(solution.is_ok());
 //! Ok::<(), cno::ModelBuilderError>(())
 //! ```
@@ -31,7 +31,8 @@ use derive_builder::Builder;
 use differential_equations::{
     derive::State as StateTrait,
     error::Error,
-    ode::{ODE, ODEProblem, OrdinaryNumericalMethod},
+    ivp::IVP,
+    ode::{ODE, OrdinaryNumericalMethod},
     prelude::{Interpolation, Solution},
 };
 
@@ -617,7 +618,7 @@ impl Solve for Model {
         tf: f64,
         dt: f64,
         init_state: Self::State,
-        solver: &mut S,
+        solver: S,
     ) -> Result<Solution<f64, Self::State>, Error<f64, Self::State>>
     where
         S: OrdinaryNumericalMethod<f64, Self::State> + Interpolation<f64, Self::State>,
@@ -637,10 +638,10 @@ impl Solve for Model {
             })
             .collect::<Vec<CnoDose>>();
 
-        let mut dosing_solout =
+        let dosing_solout =
             DoseApplyingSolout::<State<f64>, CnoDose>::new(scheduled_updates, t0, tf, dt);
-        let problem = ODEProblem::new(self, t0, tf, adjusted_init_state);
-        let mut solution = problem.solout(&mut dosing_solout).solve(solver)?;
+        let problem = IVP::ode(self, t0, tf, adjusted_init_state);
+        let mut solution = problem.solout(dosing_solout).method(solver).solve()?;
 
         // return concentrations using given Vd (except for peritoneal compartment)
         let y = solution
@@ -712,22 +713,21 @@ impl Model {
     ) -> PyResult<PySolution> {
         let result = match solver.solver_type.as_str() {
             "dopri5" => {
-                let mut solver_instance =
-                    differential_equations::methods::ExplicitRungeKutta::dopri5()
-                        .rtol(solver.rtol)
-                        .atol(solver.atol)
-                        .h0(solver.dt0)
-                        .h_min(solver.min_dt)
-                        .h_max(solver.max_dt)
-                        .max_steps(solver.max_steps)
-                        .max_rejects(solver.max_rejected_steps)
-                        .safety_factor(solver.safety_factor)
-                        .min_scale(solver.min_scale)
-                        .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                let solver_instance = differential_equations::methods::ExplicitRungeKutta::dopri5()
+                    .rtol(solver.rtol)
+                    .atol(solver.atol)
+                    .h0(solver.dt0)
+                    .h_min(solver.min_dt)
+                    .h_max(solver.max_dt)
+                    .max_steps(solver.max_steps)
+                    .max_rejects(solver.max_rejected_steps)
+                    .safety_factor(solver.safety_factor)
+                    .min_scale(solver.min_scale)
+                    .max_scale(solver.max_scale);
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             "kvaerno3" => {
-                let mut solver_instance =
+                let solver_instance =
                     differential_equations::methods::DiagonallyImplicitRungeKutta::kvaerno423()
                         .rtol(solver.rtol)
                         .atol(solver.atol)
@@ -739,7 +739,7 @@ impl Model {
                         .safety_factor(solver.safety_factor)
                         .min_scale(solver.min_scale)
                         .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             _ => {
                 return Err(PyValueError::new_err(format!(
@@ -971,7 +971,7 @@ mod tests {
 
     #[test]
     fn cno_model_simulation() -> Result<(), Box<dyn std::error::Error>> {
-        let mut solver = ExplicitRungeKutta::dopri5();
+        let solver_1 = ExplicitRungeKutta::dopri5();
         let t0 = 0.;
         let tf = 24.;
         let dt = 1.;
@@ -979,7 +979,7 @@ mod tests {
         // test default model - dose (0.03 mg) applied at t=0
         let default_model = Model::default();
         let init_state = State::zeros();
-        let solution = default_model.solve(t0, tf, dt, init_state, &mut solver);
+        let solution = default_model.solve(t0, tf, dt, init_state, solver_1);
 
         assert!(solution.is_ok());
         let solution = solution.unwrap();
@@ -987,9 +987,10 @@ mod tests {
         assert!(solution.y[0].peritoneal_cno > 0.);
 
         // apply dose at t=1
+        let solver_2 = ExplicitRungeKutta::dopri5();
         let dose = CnoDose::new(0.03, 1.);
         let custom_model = Model::builder().doses(vec![dose.clone()]).build()?;
-        let solution = custom_model.solve(t0, tf, dt, init_state, &mut solver);
+        let solution = custom_model.solve(t0, tf, dt, init_state, solver_2);
 
         assert!(solution.is_ok());
         let solution = solution.unwrap();
@@ -1010,10 +1011,10 @@ mod tests {
         let model = Model::builder()
             .doses(vec![CnoDose::new(0.03, 1.)])
             .build()?;
-        let mut solver = ExplicitRungeKutta::dopri5();
+        let solver = ExplicitRungeKutta::dopri5();
         let init_state = State::zeros();
 
-        let solution = model.solve(0., 10., 0.1, init_state, &mut solver);
+        let solution = model.solve(0., 10., 0.1, init_state, solver);
         assert!(solution.is_ok());
         Ok(())
     }
@@ -1027,9 +1028,9 @@ mod tests {
         let t0 = 0.;
         let tf = 10.;
         let init_state = State::zeros();
-        let mut solver = ExplicitRungeKutta::dopri5();
+        let solver = ExplicitRungeKutta::dopri5();
 
-        let solution = model.solve(t0, tf, dt, init_state, &mut solver);
+        let solution = model.solve(t0, tf, dt, init_state, solver);
         assert!(solution.is_ok());
         let solution = solution.unwrap();
         assert!(matches!(solution.status, Status::Complete));
@@ -1037,10 +1038,11 @@ mod tests {
         assert_eq!(solution.y.len(), expected_len);
         println!("{:?}", solution.t);
 
+        let solver = ExplicitRungeKutta::dopri5();
         let model = Model::builder()
             .doses(vec![CnoDose::new(0.03, 1.5)])
             .build()?;
-        let solution = model.solve(t0, tf, dt, init_state, &mut solver);
+        let solution = model.solve(t0, tf, dt, init_state, solver);
         assert!(solution.is_ok());
         let solution = solution.unwrap();
         assert!(matches!(solution.status, Status::Complete));
@@ -1058,14 +1060,14 @@ mod tests {
     #[cfg(any(feature = "polars-native", feature = "polars-wasm"))]
     #[test]
     fn dataframe_conversion() -> Result<(), PolarsError> {
-        let mut solver = ExplicitRungeKutta::dopri5();
+        let solver = ExplicitRungeKutta::dopri5();
         let init_state = State::zeros();
         let model = Model::builder()
             .doses(vec![CnoDose::new(0.03, 1.5)])
             .build()
             .unwrap();
 
-        let solution = model.solve(0., 24., 1., init_state, &mut solver);
+        let solution = model.solve(0., 24., 1., init_state, solver);
         assert!(solution.is_ok());
         let unwrapped_solution = solution.unwrap();
 

@@ -18,9 +18,9 @@
 //! let cno_pk = cno::Model::builder().doses(vec![dose]).build()?;
 //! let model = chemogenetic::Model::builder().cno_pk_model(cno_pk).build()?;
 //! let init_state = chemogenetic::State::zeros();
-//! let mut solver = ExplicitRungeKutta::dopri5();
+//! let solver = ExplicitRungeKutta::dopri5();
 //!
-//! let solution = model.solve(0., 48., 1., init_state, &mut solver);
+//! let solution = model.solve(0., 48., 1., init_state, solver);
 //! assert!(solution.is_ok());
 //! Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -47,7 +47,8 @@ use derive_builder::Builder;
 use differential_equations::{
     derive::State as StateTrait,
     error::Error,
-    ode::{ODE, ODEProblem, OrdinaryNumericalMethod},
+    ivp::IVP,
+    ode::{ODE, OrdinaryNumericalMethod},
     prelude::{Interpolation, Solution},
 };
 
@@ -725,7 +726,7 @@ impl Solve for Model {
         tf: f64,
         dt: f64,
         init_state: Self::State,
-        solver: &mut S,
+        solver: S,
     ) -> Result<Solution<f64, Self::State>, Error<f64, Self::State>>
     where
         S: OrdinaryNumericalMethod<f64, Self::State> + Interpolation<f64, Self::State>,
@@ -745,10 +746,10 @@ impl Solve for Model {
             })
             .collect::<Vec<CnoDose>>();
 
-        let mut dosing_solout =
+        let dosing_solout =
             DoseApplyingSolout::<State<f64>, CnoDose>::new(scheduled_updates, t0, tf, dt);
-        let problem = ODEProblem::new(self, t0, tf, adjusted_init_state);
-        let mut solution = problem.solout(&mut dosing_solout).solve(solver)?;
+        let problem = IVP::ode(self, t0, tf, adjusted_init_state);
+        let mut solution = problem.solout(dosing_solout).method(solver).solve()?;
 
         // return concentrations using given Vd (except for peritoneal compartment)
         let y = solution
@@ -1197,7 +1198,7 @@ fn build_forcing_series(
     plasma_dox_ss: f64,
     brain_dox_ss: f64,
 ) -> PyResult<ForcingSeries> {
-    let mut dox_solver = DiagonallyImplicitRungeKutta::kvaerno423()
+    let dox_solver = DiagonallyImplicitRungeKutta::kvaerno423()
         .h0(dt_sub)
         .h_max(dt_sub);
     let dox_solution = dox_pk_model
@@ -1206,7 +1207,7 @@ fn build_forcing_series(
             tf,
             dt_sub,
             DoxState::new(plasma_dox_ss, brain_dox_ss),
-            &mut dox_solver,
+            dox_solver,
         )
         .map_err(|e| PyValueError::new_err(format!("Failed to solve dox PK model: {:?}", e)))?;
 
@@ -1222,11 +1223,11 @@ fn build_forcing_series(
         ));
     }
 
-    let mut cno_solver = DiagonallyImplicitRungeKutta::kvaerno423()
+    let cno_solver = DiagonallyImplicitRungeKutta::kvaerno423()
         .h0(dt_sub)
         .h_max(dt_sub);
     let cno_solution = cno_pk_model
-        .solve(t0, tf, dt_sub, CNOState::zeros(), &mut cno_solver)
+        .solve(t0, tf, dt_sub, CNOState::zeros(), cno_solver)
         .map_err(|e| PyValueError::new_err(format!("Failed to solve CNO PK model: {:?}", e)))?;
 
     let cno_t = cno_solution.t.clone();
@@ -1595,22 +1596,21 @@ impl Model {
     ) -> PyResult<PySolution> {
         let result = match solver.solver_type.as_str() {
             "dopri5" => {
-                let mut solver_instance =
-                    differential_equations::methods::ExplicitRungeKutta::dopri5()
-                        .rtol(solver.rtol)
-                        .atol(solver.atol)
-                        .h0(solver.dt0)
-                        .h_min(solver.min_dt)
-                        .h_max(solver.max_dt)
-                        .max_steps(solver.max_steps)
-                        .max_rejects(solver.max_rejected_steps)
-                        .safety_factor(solver.safety_factor)
-                        .min_scale(solver.min_scale)
-                        .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                let solver_instance = differential_equations::methods::ExplicitRungeKutta::dopri5()
+                    .rtol(solver.rtol)
+                    .atol(solver.atol)
+                    .h0(solver.dt0)
+                    .h_min(solver.min_dt)
+                    .h_max(solver.max_dt)
+                    .max_steps(solver.max_steps)
+                    .max_rejects(solver.max_rejected_steps)
+                    .safety_factor(solver.safety_factor)
+                    .min_scale(solver.min_scale)
+                    .max_scale(solver.max_scale);
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             "kvaerno3" => {
-                let mut solver_instance =
+                let solver_instance =
                     differential_equations::methods::DiagonallyImplicitRungeKutta::kvaerno423()
                         .rtol(solver.rtol)
                         .atol(solver.atol)
@@ -1622,7 +1622,7 @@ impl Model {
                         .safety_factor(solver.safety_factor)
                         .min_scale(solver.min_scale)
                         .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             _ => {
                 return Err(PyValueError::new_err(format!(
@@ -1771,8 +1771,8 @@ mod tests {
     fn model_simulation() -> Result<(), ModelBuilderError> {
         let model = Model::default();
         let state = State::zeros();
-        let mut solver = DiagonallyImplicitRungeKutta::kvaerno423();
-        let solution = model.solve(0., 48., 1., state, &mut solver);
+        let solver_1 = DiagonallyImplicitRungeKutta::kvaerno423();
+        let solution = model.solve(0., 48., 1., state, solver_1);
 
         assert!(solution.is_ok());
         let solution = solution.unwrap();
@@ -1786,8 +1786,9 @@ mod tests {
         assert!(solution.max_plasma_dox().is_ok());
 
         // test simulation with high leaky rma prod
+        let solver_2 = DiagonallyImplicitRungeKutta::kvaerno423();
         let model = Model::builder().leaky_rma_prod(0.2).build()?;
-        let solution = model.solve(0., 48., 1., state, &mut solver);
+        let solution = model.solve(0., 48., 1., state, solver_2);
         assert!(solution.is_ok());
 
         Ok(())
@@ -1798,8 +1799,8 @@ mod tests {
     fn dataframe_conversion() -> Result<(), PolarsError> {
         let model = Model::default();
         let state = State::zeros();
-        let mut solver = DiagonallyImplicitRungeKutta::kvaerno423();
-        let solution = model.solve(0., 48., 1., state, &mut solver);
+        let solver = DiagonallyImplicitRungeKutta::kvaerno423();
+        let solution = model.solve(0., 48., 1., state, solver);
 
         assert!(solution.is_ok());
         let solution = solution.unwrap();

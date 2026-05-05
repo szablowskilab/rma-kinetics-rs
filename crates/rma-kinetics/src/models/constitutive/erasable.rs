@@ -11,7 +11,8 @@ use derive_builder::Builder;
 use differential_equations::{
     derive::State as StateTrait,
     error::Error,
-    ode::{ODE, ODEProblem, OrdinaryNumericalMethod},
+    ivp::IVP,
+    ode::{ODE, OrdinaryNumericalMethod},
     prelude::{Interpolation, Solution},
 };
 
@@ -333,22 +334,21 @@ impl Model {
     ) -> PyResult<PySolution> {
         let result = match solver.solver_type.as_str() {
             "dopri5" => {
-                let mut solver_instance =
-                    differential_equations::methods::ExplicitRungeKutta::dopri5()
-                        .rtol(solver.rtol)
-                        .atol(solver.atol)
-                        .h0(solver.dt0)
-                        .h_min(solver.min_dt)
-                        .h_max(solver.max_dt)
-                        .max_steps(solver.max_steps)
-                        .max_rejects(solver.max_rejected_steps)
-                        .safety_factor(solver.safety_factor)
-                        .min_scale(solver.min_scale)
-                        .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                let solver_instance = differential_equations::methods::ExplicitRungeKutta::dopri5()
+                    .rtol(solver.rtol)
+                    .atol(solver.atol)
+                    .h0(solver.dt0)
+                    .h_min(solver.min_dt)
+                    .h_max(solver.max_dt)
+                    .max_steps(solver.max_steps)
+                    .max_rejects(solver.max_rejected_steps)
+                    .safety_factor(solver.safety_factor)
+                    .min_scale(solver.min_scale)
+                    .max_scale(solver.max_scale);
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             "kvaerno3" => {
-                let mut solver_instance =
+                let solver_instance =
                     differential_equations::methods::DiagonallyImplicitRungeKutta::kvaerno423()
                         .rtol(solver.rtol)
                         .atol(solver.atol)
@@ -360,7 +360,7 @@ impl Model {
                         .safety_factor(solver.safety_factor)
                         .min_scale(solver.min_scale)
                         .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             _ => {
                 return Err(PyValueError::new_err(format!(
@@ -423,7 +423,7 @@ impl Solve for Model {
         tf: f64,
         dt: f64,
         init_state: Self::State,
-        solver: &mut S,
+        solver: S,
     ) -> Result<Solution<f64, Self::State>, Error<f64, Self::State>>
     where
         S: OrdinaryNumericalMethod<f64, Self::State> + Interpolation<f64, Self::State>,
@@ -442,11 +442,11 @@ impl Solve for Model {
             })
             .collect::<Vec<TevDose>>();
 
-        let mut dosing_solout =
+        let dosing_solout =
             DoseApplyingSolout::<State<f64>, TevDose>::new(scheduled_updates, t0, tf, dt);
 
-        let problem = ODEProblem::new(self, t0, tf, adjusted_init_state);
-        let mut solution = problem.solout(&mut dosing_solout).solve(solver)?;
+        let problem = IVP::ode(self, t0, tf, adjusted_init_state);
+        let mut solution = problem.solout(dosing_solout).method(solver).solve()?;
 
         // Return TEV as concentration using configured Vd.
         let y = solution
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn erasable_model_simulation() -> Result<(), Box<dyn std::error::Error>> {
-        let mut solver = ExplicitRungeKutta::dopri5();
+        let solver = ExplicitRungeKutta::dopri5();
         let t0 = 0.;
         let tf = 24.;
         let dt = 1.;
@@ -495,7 +495,7 @@ mod tests {
             .doses(vec![dose.clone()])
             .tev_plasma_vd(2.)
             .build()?;
-        let solution = model.solve(t0, tf, dt, init_state, &mut solver)?;
+        let solution = model.solve(t0, tf, dt, init_state, solver)?;
 
         assert!(matches!(solution.status, Status::Complete));
         assert_eq!(solution.y[1].plasma_tev, dose.nmol / 2.);
@@ -514,17 +514,18 @@ mod tests {
         let t0 = 0.;
         let tf = 10.;
         let init_state = State::zeros();
-        let mut solver = ExplicitRungeKutta::dopri5();
+        let solver = ExplicitRungeKutta::dopri5();
 
-        let solution = model.solve(t0, tf, dt, init_state, &mut solver)?;
+        let solution = model.solve(t0, tf, dt, init_state, solver)?;
         assert!(matches!(solution.status, Status::Complete));
         let expected_len = ((tf - t0) / dt).ceil() as usize + 1;
         assert_eq!(solution.y.len(), expected_len);
 
+        let solver = ExplicitRungeKutta::dopri5();
         let model = Model::builder()
             .doses(vec![TevDose::new(10., 1.5)])
             .build()?;
-        let solution = model.solve(t0, tf, dt, init_state, &mut solver)?;
+        let solution = model.solve(t0, tf, dt, init_state, solver)?;
         assert!(matches!(solution.status, Status::Complete));
         let uneven_expected_len = ((tf - t0) / dt).ceil() as usize + 2;
         assert_eq!(solution.y.len(), uneven_expected_len);
@@ -540,8 +541,8 @@ mod tests {
             .doses(vec![TevDose::new(12., 0.)])
             .tev_plasma_vd(3.)
             .build()?;
-        let mut solver = ExplicitRungeKutta::dopri5();
-        let solution = model.solve(0., 2., 1., State::zeros(), &mut solver)?;
+        let solver = ExplicitRungeKutta::dopri5();
+        let solution = model.solve(0., 2., 1., State::zeros(), solver)?;
 
         assert!(solution.y[0].plasma_tev > 0.);
         assert_eq!(solution.y[0].plasma_tev, 12. / 3.);

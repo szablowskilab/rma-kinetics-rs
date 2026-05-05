@@ -25,9 +25,9 @@
 //!
 //! let model = constitutive::Model::default();
 //! let init_state = constitutive::State::zeros();
-//! let mut solver = ExplicitRungeKutta::dopri5();
+//! let solver = ExplicitRungeKutta::dopri5();
 //!
-//! let solution = model.solve(0., 100., 1., init_state, &mut solver);
+//! let solution = model.solve(0., 100., 1., init_state, solver);
 //! assert!(solution.is_ok());
 //! ```
 //!

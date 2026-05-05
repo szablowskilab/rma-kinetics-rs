@@ -2,7 +2,8 @@ use derive_builder::Builder;
 use differential_equations::{
     derive::State as StateTrait,
     error::Error,
-    ode::{ODE, ODEProblem, OrdinaryNumericalMethod},
+    ivp::IVP,
+    ode::{ODE, OrdinaryNumericalMethod},
     prelude::{Interpolation, Solution},
 };
 
@@ -732,22 +733,21 @@ impl Model {
     ) -> PyResult<PySolution> {
         let result = match solver.solver_type.as_str() {
             "dopri5" => {
-                let mut solver_instance =
-                    differential_equations::methods::ExplicitRungeKutta::dopri5()
-                        .rtol(solver.rtol)
-                        .atol(solver.atol)
-                        .h0(solver.dt0)
-                        .h_min(solver.min_dt)
-                        .h_max(solver.max_dt)
-                        .max_steps(solver.max_steps)
-                        .max_rejects(solver.max_rejected_steps)
-                        .safety_factor(solver.safety_factor)
-                        .min_scale(solver.min_scale)
-                        .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                let solver_instance = differential_equations::methods::ExplicitRungeKutta::dopri5()
+                    .rtol(solver.rtol)
+                    .atol(solver.atol)
+                    .h0(solver.dt0)
+                    .h_min(solver.min_dt)
+                    .h_max(solver.max_dt)
+                    .max_steps(solver.max_steps)
+                    .max_rejects(solver.max_rejected_steps)
+                    .safety_factor(solver.safety_factor)
+                    .min_scale(solver.min_scale)
+                    .max_scale(solver.max_scale);
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             "kvaerno3" => {
-                let mut solver_instance =
+                let solver_instance =
                     differential_equations::methods::DiagonallyImplicitRungeKutta::kvaerno423()
                         .rtol(solver.rtol)
                         .atol(solver.atol)
@@ -759,7 +759,7 @@ impl Model {
                         .safety_factor(solver.safety_factor)
                         .min_scale(solver.min_scale)
                         .max_scale(solver.max_scale);
-                self.solve(t0, tf, dt, init_state.inner, &mut solver_instance)
+                self.solve(t0, tf, dt, init_state.inner, solver_instance)
             }
             _ => {
                 return Err(PyValueError::new_err(format!(
@@ -964,7 +964,7 @@ impl Solve for Model {
         tf: f64,
         dt: f64,
         init_state: Self::State,
-        solver: &mut S,
+        solver: S,
     ) -> Result<Solution<f64, Self::State>, Error<f64, Self::State>>
     where
         S: OrdinaryNumericalMethod<f64, Self::State> + Interpolation<f64, Self::State>,
@@ -1001,11 +1001,11 @@ impl Solve for Model {
 
         scheduled_updates.sort_by(|a, b| a.time().total_cmp(&b.time()));
 
-        let mut dosing_solout =
+        let dosing_solout =
             DoseApplyingSolout::<State<f64>, ScheduledUpdate>::new(scheduled_updates, t0, tf, dt);
 
-        let problem = ODEProblem::new(self, t0, tf, adjusted_init_state);
-        let mut solution = problem.solout(&mut dosing_solout).solve(solver)?;
+        let problem = IVP::ode(self, t0, tf, adjusted_init_state);
+        let mut solution = problem.solout(dosing_solout).method(solver).solve()?;
 
         let y = solution
             .y
@@ -1052,8 +1052,8 @@ mod tests {
             .unwrap();
 
         let init_state = State::zeros();
-        let mut solver = ExplicitRungeKutta::dopri5();
-        let solution = model.solve(0., 8., 1., init_state, &mut solver).unwrap();
+        let solver = ExplicitRungeKutta::dopri5();
+        let solution = model.solve(0., 8., 1., init_state, solver).unwrap();
 
         let dose_idx = solution
             .t

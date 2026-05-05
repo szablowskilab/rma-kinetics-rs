@@ -85,7 +85,7 @@ pub trait Solve {
         tf: f64,
         dt: f64,
         init_state: Self::State,
-        solver: &mut S,
+        solver: S,
     ) -> Result<Solution<f64, Self::State>, Error<f64, Self::State>>
     where
         S: OrdinaryNumericalMethod<f64, Self::State> + Interpolation<f64, Self::State>;
@@ -104,7 +104,7 @@ pub trait StochasticSolve {
         tf: f64,
         dt: f64,
         init_state: Self::State,
-        solver: &mut S,
+        solver: S,
     ) -> Result<Solution<f64, Self::State>, Error<f64, Self::State>>
     where
         S: StochasticNumericalMethod<f64, Self::State> + Interpolation<f64, Self::State>;
