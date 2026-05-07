@@ -1,10 +1,33 @@
 from typing import TYPE_CHECKING
 
+from numpy import float64
+from numpy.typing import ArrayLike, NDArray
+
 from . import erasable as erasable
 
 if TYPE_CHECKING:
     from ... import Solution
     from ...solvers import Solver
+
+class InferenceSolver:
+    """Constitutive inference solver for plasma RMA predictions and adjoint VJPs."""
+
+    def __init__(
+        self,
+        obs_time: ArrayLike,
+        *,
+        init_state: State | None = None,
+        t0: float = 0.0,
+        tf: float | None = None,
+        dt: float = 0.25,
+    ) -> None: ...
+    @property
+    def n_obs(self) -> int: ...
+    def predict(self, log_params: ArrayLike) -> NDArray[float64]: ...
+    def predict_and_vjp(
+        self, log_params: ArrayLike, cotangent: ArrayLike
+    ) -> tuple[NDArray[float64], NDArray[float64]]: ...
+    def clear_cache(self) -> None: ...
 
 class Model:
     """Constitutive RMA expression model."""

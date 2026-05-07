@@ -9,13 +9,26 @@ use differential_equations::{
 use nalgebra::SVector;
 use thiserror::Error;
 
+#[cfg(feature = "py")]
+use std::sync::Mutex;
+
+#[cfg(feature = "py")]
+use numpy::{PyArray1, PyReadonlyArray1};
+
+#[cfg(feature = "py")]
+use pyo3::{Bound, PyResult, Python, exceptions::PyValueError, pyclass, pymethods};
+
 use crate::{
     inference::Cotangent,
     models::constitutive::{AdjointModel, AdjointState, Model, State},
     solve::Solve,
 };
 
+#[cfg(feature = "py")]
+use crate::models::constitutive::PyState;
+
 /// Forward solve result that can be reused for prediction and VJP computation.
+#[derive(Clone)]
 pub struct ConstitutiveForwardResult {
     pub log_params: [f64; 3],
     pub raw_params: SVector<f64, 3>,
@@ -81,21 +94,10 @@ pub fn predict_and_vjp(
     validate_cotangents(cotangent)?;
 
     let forward = solve_forward(log_params, init_state, obs_times, t0, tf, dt)?;
-    let mut cotangents = obs_times
-        .iter()
-        .zip(cotangent.iter())
-        .map(|(&time, &value)| Cotangent { time, value })
-        .collect::<Vec<_>>();
+    let predictions = forward.predictions.clone();
+    let gradient = vjp_from_forward(forward, obs_times, cotangent, t0, tf)?;
 
-    let adjoint_model = AdjointModel::new(forward.raw_params, forward.solution);
-    let grad_raw =
-        adjoint_model.solve_vjp(tf, t0, AdjointState::zeros(), &mut cotangents, || {
-            ExplicitRungeKutta::dopri5()
-        })?;
-
-    let grad_log = grad_raw.component_mul(&forward.raw_params);
-
-    Ok((forward.predictions, [grad_log[0], grad_log[1], grad_log[2]]))
+    Ok((predictions, gradient))
 }
 
 /// Solve the forward model with log-rate parameters.
@@ -136,6 +138,35 @@ pub fn solve_forward(
     })
 }
 
+fn vjp_from_forward(
+    forward: ConstitutiveForwardResult,
+    obs_times: &[f64],
+    cotangent: &[f64],
+    t0: f64,
+    tf: f64,
+) -> Result<[f64; 3], InferenceError> {
+    if obs_times.len() != cotangent.len() {
+        return Err(InferenceError::LengthMismatch);
+    }
+    validate_cotangents(cotangent)?;
+
+    let mut cotangents = obs_times
+        .iter()
+        .zip(cotangent.iter())
+        .map(|(&time, &value)| Cotangent { time, value })
+        .collect::<Vec<_>>();
+
+    let raw_params = forward.raw_params;
+    let adjoint_model = AdjointModel::new(raw_params, forward.solution);
+    let grad_raw =
+        adjoint_model.solve_vjp(tf, t0, AdjointState::zeros(), &mut cotangents, || {
+            ExplicitRungeKutta::dopri5()
+        })?;
+
+    let grad_log = grad_raw.component_mul(&raw_params);
+    Ok([grad_log[0], grad_log[1], grad_log[2]])
+}
+
 fn validate_inputs(
     log_params: [f64; 3],
     init_state: State<f64>,
@@ -171,6 +202,193 @@ fn validate_cotangents(cotangent: &[f64]) -> Result<(), InferenceError> {
         return Err(InferenceError::NonFiniteCotangents);
     }
     Ok(())
+}
+
+#[cfg(feature = "py")]
+#[derive(Clone)]
+struct CachedForward {
+    log_params: [f64; 3],
+    forward: ConstitutiveForwardResult,
+}
+
+#[cfg(feature = "py")]
+#[pyclass(name = "InferenceSolver")]
+pub struct PyInferenceSolver {
+    obs_time: Vec<f64>,
+    init_state: State<f64>,
+    t0: f64,
+    tf: f64,
+    dt: f64,
+    cached_forward: Mutex<Option<CachedForward>>,
+}
+
+#[cfg(feature = "py")]
+#[pymethods]
+impl PyInferenceSolver {
+    #[new]
+    #[pyo3(signature = (obs_time, *, init_state=None, t0=0.0, tf=None, dt=0.25))]
+    fn new(
+        obs_time: PyReadonlyArray1<'_, f64>,
+        init_state: Option<PyState>,
+        t0: f64,
+        tf: Option<f64>,
+        dt: f64,
+    ) -> PyResult<Self> {
+        let obs_time = obs_time.as_array().iter().copied().collect::<Vec<f64>>();
+        let tf = match tf {
+            Some(value) => value,
+            None => obs_time.iter().copied().reduce(f64::max).ok_or_else(|| {
+                PyValueError::new_err("obs_time must not be empty when tf is None")
+            })?,
+        };
+        let init_state = init_state
+            .map(|state| state.inner)
+            .unwrap_or_else(State::zeros);
+
+        validate_inputs([0.0, 0.0, 0.0], init_state, &obs_time, t0, tf, dt)
+            .map_err(py_inference_error)?;
+
+        Ok(Self {
+            obs_time,
+            init_state,
+            t0,
+            tf,
+            dt,
+            cached_forward: Mutex::new(None),
+        })
+    }
+
+    #[getter]
+    fn get_n_obs(&self) -> usize {
+        self.obs_time.len()
+    }
+
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        log_params: PyReadonlyArray1<'_, f64>,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let log_params = py_log_params(log_params)?;
+        let obs_time = self.obs_time.clone();
+        let init_state = self.init_state;
+        let t0 = self.t0;
+        let tf = self.tf;
+        let dt = self.dt;
+
+        let forward = py
+            .detach(move || solve_forward(log_params, init_state, &obs_time, t0, tf, dt))
+            .map_err(py_inference_error)?;
+        let predictions = forward.predictions.clone();
+
+        {
+            let mut cache = self
+                .cached_forward
+                .lock()
+                .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+            *cache = Some(CachedForward {
+                log_params,
+                forward,
+            });
+        }
+
+        Ok(PyArray1::from_vec(py, predictions))
+    }
+
+    fn predict_and_vjp<'py>(
+        &self,
+        py: Python<'py>,
+        log_params: PyReadonlyArray1<'_, f64>,
+        cotangent: PyReadonlyArray1<'_, f64>,
+    ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
+        let log_params = py_log_params(log_params)?;
+        let cotangent = cotangent.as_array().iter().copied().collect::<Vec<f64>>();
+        if cotangent.len() != self.obs_time.len() {
+            return Err(PyValueError::new_err(format!(
+                "cotangent length {} does not match n_obs {}",
+                cotangent.len(),
+                self.obs_time.len()
+            )));
+        }
+        validate_cotangents(&cotangent).map_err(py_inference_error)?;
+
+        let cached_forward = {
+            let cache = self
+                .cached_forward
+                .lock()
+                .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+            cache
+                .as_ref()
+                .filter(|cached| same_log_params(cached.log_params, log_params))
+                .map(|cached| cached.forward.clone())
+        };
+
+        let obs_time = self.obs_time.clone();
+        let init_state = self.init_state;
+        let t0 = self.t0;
+        let tf = self.tf;
+        let dt = self.dt;
+
+        let (forward, gradient) = py
+            .detach(move || {
+                let forward = match cached_forward {
+                    Some(forward) => forward,
+                    None => solve_forward(log_params, init_state, &obs_time, t0, tf, dt)?,
+                };
+                let predictions_forward = forward.clone();
+                let gradient = vjp_from_forward(forward, &obs_time, &cotangent, t0, tf)?;
+                Ok::<_, InferenceError>((predictions_forward, gradient))
+            })
+            .map_err(py_inference_error)?;
+
+        {
+            let mut cache = self
+                .cached_forward
+                .lock()
+                .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+            *cache = Some(CachedForward {
+                log_params,
+                forward: forward.clone(),
+            });
+        }
+
+        Ok((
+            PyArray1::from_vec(py, forward.predictions),
+            PyArray1::from_vec(py, gradient.to_vec()),
+        ))
+    }
+
+    fn clear_cache(&self) -> PyResult<()> {
+        let mut cache = self
+            .cached_forward
+            .lock()
+            .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+        *cache = None;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "py")]
+fn same_log_params(a: [f64; 3], b: [f64; 3]) -> bool {
+    a.iter()
+        .zip(b.iter())
+        .all(|(left, right)| left.to_bits() == right.to_bits())
+}
+
+#[cfg(feature = "py")]
+fn py_log_params(log_params: PyReadonlyArray1<'_, f64>) -> PyResult<[f64; 3]> {
+    let log_params = log_params.as_array().iter().copied().collect::<Vec<f64>>();
+    if log_params.len() != 3 {
+        return Err(PyValueError::new_err(format!(
+            "log_params length {} does not match expected length 3",
+            log_params.len()
+        )));
+    }
+    Ok([log_params[0], log_params[1], log_params[2]])
+}
+
+#[cfg(feature = "py")]
+fn py_inference_error(error: InferenceError) -> pyo3::PyErr {
+    PyValueError::new_err(error.to_string())
 }
 
 fn interpolate_plasma_rma(solution: &Solution<f64, State<f64>>, time: f64) -> f64 {

@@ -1,7 +1,24 @@
+from typing import Any
+
 from numpy import float64
 from numpy.typing import NDArray
 
-models: object
+class _ConstitutiveModule:
+    InferenceSolver: type[Any]
+    Model: type[Any]
+    State: type[Any]
+    StochasticModel: type[Any]
+
+class _ModelsModule:
+    chemogenetic: Any
+    cno: Any
+    constitutive: _ConstitutiveModule
+    dox: Any
+    erasable: Any
+    oscillation: Any
+    tetoff: Any
+
+models: _ModelsModule
 
 # ============================================================================
 # Solution class (returned from Model.solve())
