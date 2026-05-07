@@ -2832,6 +2832,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+pymc = [
+    { name = "pymc", version = "5.25.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pymc", version = "5.28.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pytensor", version = "2.31.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pytensor", version = "2.38.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
 tests = [
     { name = "pytest" },
 ]
@@ -2867,9 +2873,11 @@ tests = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.2.6" },
+    { name = "pymc", marker = "extra == 'pymc'", specifier = ">=5.25.1" },
+    { name = "pytensor", marker = "extra == 'pymc'", specifier = ">=2.31.7" },
     { name = "pytest", marker = "extra == 'tests'" },
 ]
-provides-extras = ["tests"]
+provides-extras = ["pymc", "tests"]
 
 [package.metadata.requires-dev]
 dev = [

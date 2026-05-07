@@ -32,6 +32,42 @@ def test_constitutive_state_creation():
     assert custom_state.brain_rma == 20 and custom_state.plasma_rma == 10
 
 
+def test_constitutive_inference_solver_accepts_integer_obs_time():
+    obs_time = np.array([0, 336, 504], dtype=np.int64)
+    solver = models.constitutive.InferenceSolver(obs_time=obs_time, dt=1.0)
+    assert solver.n_obs == 3
+
+    log_params = np.log(np.array([0.2, 0.6, 0.007]))
+    predictions = solver.predict(log_params)
+    assert predictions.shape == (3,)
+
+
+def test_constitutive_population_inference_solver():
+    mouse_id = np.array([0, 0, 1, 1], dtype=np.int64)
+    obs_time = np.array([1, 6, 1, 12], dtype=np.int64)
+    solver = models.constitutive.PopulationInferenceSolver(
+        mouse_id=mouse_id, obs_time=obs_time, n_mice=3, tf=24, dt=0.25
+    )
+    assert solver.n_obs == 4
+    assert solver.n_mice == 3
+
+    log_prod_mouse = np.log(np.array([0.2, 0.4, 0.8]))
+    log_bbb = float(np.log(0.6))
+    log_deg = float(np.log(0.007))
+    predictions = solver.predict(log_prod_mouse, log_bbb, log_deg)
+    assert predictions.shape == (4,)
+
+    cotangent = np.array([0.25, -0.5, 0.75, 1.25])
+    predictions_vjp, grad_prod, grad_bbb, grad_deg = solver.predict_and_vjp(
+        log_prod_mouse, log_bbb, log_deg, cotangent
+    )
+    np.testing.assert_allclose(predictions_vjp, predictions)
+    assert grad_prod.shape == (3,)
+    assert grad_prod[2] == 0.0
+    assert isinstance(grad_bbb, float)
+    assert isinstance(grad_deg, float)
+
+
 def test_constitutive_solve():
     model = models.constitutive.Model()
     state = models.constitutive.State()

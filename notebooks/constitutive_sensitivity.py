@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.23.5"
 app = marimo.App(width="medium")
 
 
@@ -121,7 +121,7 @@ def _(data_dir, linestyles, os, param_labels, plt, sigma, time):
 @app.cell
 def _(mu_conf, mu_star, np, pl, sigma):
     # sens std at selected time points (summary)
-    timepoints = [12, 252, 504]
+    timepoints = [12, 336, 504]
     _time = []
     _params = []
     mu = []
@@ -219,7 +219,7 @@ def _(alphas, colors, data_dir, mu_df, os, pl, plt, t, times, width, x):
     for _i, _t in enumerate(times):
         _subset = mu_df.filter(pl.col("time") == _t)
         s = _subset["sigma_norm"]
-    
+
         plt.bar(
             x + _i * width,
             s,

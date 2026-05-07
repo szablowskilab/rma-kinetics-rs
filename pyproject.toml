@@ -22,6 +22,10 @@ dependencies = [
 tests = [
     "pytest",
 ]
+pymc = [
+    "pymc>=5.25.1",
+    "pytensor>=2.31.7",
+]
 [tool.maturin]
 python-source = "python"
 manifest-path = "crates/rma-kinetics/Cargo.toml"

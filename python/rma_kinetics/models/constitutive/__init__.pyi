@@ -29,6 +29,36 @@ class InferenceSolver:
     ) -> tuple[NDArray[float64], NDArray[float64]]: ...
     def clear_cache(self) -> None: ...
 
+class PopulationInferenceSolver:
+    """Constitutive population inference solver for mouse-specific production rates."""
+
+    def __init__(
+        self,
+        mouse_id: ArrayLike,
+        obs_time: ArrayLike,
+        n_mice: int,
+        *,
+        init_state: State | None = None,
+        t0: float = 0.0,
+        tf: float | None = None,
+        dt: float = 0.25,
+    ) -> None: ...
+    @property
+    def n_obs(self) -> int: ...
+    @property
+    def n_mice(self) -> int: ...
+    def predict(
+        self, log_prod_mouse: ArrayLike, log_bbb: float, log_deg: float
+    ) -> NDArray[float64]: ...
+    def predict_and_vjp(
+        self,
+        log_prod_mouse: ArrayLike,
+        log_bbb: float,
+        log_deg: float,
+        cotangent: ArrayLike,
+    ) -> tuple[NDArray[float64], NDArray[float64], float, float]: ...
+    def clear_cache(self) -> None: ...
+
 class Model:
     """Constitutive RMA expression model."""
 

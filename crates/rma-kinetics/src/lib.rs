@@ -90,6 +90,8 @@ mod py_constitutive {
     #[pymodule_export]
     use super::models::constitutive::inference::PyInferenceSolver;
     #[pymodule_export]
+    use super::models::constitutive::inference::PyPopulationInferenceSolver;
+    #[pymodule_export]
     use super::py_constitutive_erasable;
 }
 

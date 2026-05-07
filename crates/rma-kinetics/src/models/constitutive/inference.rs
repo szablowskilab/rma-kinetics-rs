@@ -13,7 +13,7 @@ use thiserror::Error;
 use std::sync::Mutex;
 
 #[cfg(feature = "py")]
-use numpy::{PyArray1, PyReadonlyArray1};
+use numpy::{AllowTypeChange, PyArray1, PyArrayLike1};
 
 #[cfg(feature = "py")]
 use pyo3::{Bound, PyResult, Python, exceptions::PyValueError, pyclass, pymethods};
@@ -55,6 +55,14 @@ pub enum InferenceError {
     InvalidTimeBounds,
     #[error("observation time out of bounds")]
     ObservationTimeOutOfBounds,
+    #[error("n_mice must be greater than zero")]
+    InvalidMouseCount,
+    #[error("log_prod_mouse length does not match n_mice")]
+    LogProdMouseLengthMismatch,
+    #[error("mouse_id and obs_times must have the same length")]
+    MouseIdLengthMismatch,
+    #[error("mouse_id out of bounds")]
+    MouseIdOutOfBounds,
     #[error("forward solve failed: {0:?}")]
     ForwardSolve(#[from] OdeError<f64, State<f64>>),
     #[error("adjoint solve failed: {0:?}")]
@@ -100,6 +108,84 @@ pub fn predict_and_vjp(
     Ok((predictions, gradient))
 }
 
+/// Forward solve result for population inference.
+#[derive(Clone)]
+pub struct PopulationForwardResult {
+    pub log_prod_mouse: Vec<f64>,
+    pub log_bbb: f64,
+    pub log_deg: f64,
+    pub predictions: Vec<f64>,
+    pub per_mouse_forward: Vec<Option<ConstitutiveForwardResult>>,
+}
+
+/// Solve one constitutive trajectory per mouse and return plasma RMA predictions
+/// in the original observation order.
+pub fn population_predict(
+    log_prod_mouse: &[f64],
+    log_bbb: f64,
+    log_deg: f64,
+    init_state: State<f64>,
+    mouse_id: &[usize],
+    obs_times: &[f64],
+    n_mice: usize,
+    t0: f64,
+    tf: f64,
+    dt: f64,
+) -> Result<Vec<f64>, InferenceError> {
+    Ok(solve_population_forward(
+        log_prod_mouse,
+        log_bbb,
+        log_deg,
+        init_state,
+        mouse_id,
+        obs_times,
+        n_mice,
+        t0,
+        tf,
+        dt,
+    )?
+    .predictions)
+}
+
+/// Solve one constitutive trajectory per mouse, then reuse those forward
+/// solutions for an adjoint vector-Jacobian product.
+pub fn population_predict_and_vjp(
+    log_prod_mouse: &[f64],
+    log_bbb: f64,
+    log_deg: f64,
+    init_state: State<f64>,
+    mouse_id: &[usize],
+    obs_times: &[f64],
+    cotangent: &[f64],
+    n_mice: usize,
+    t0: f64,
+    tf: f64,
+    dt: f64,
+) -> Result<(Vec<f64>, Vec<f64>, f64, f64), InferenceError> {
+    if obs_times.len() != cotangent.len() {
+        return Err(InferenceError::LengthMismatch);
+    }
+    validate_cotangents(cotangent)?;
+
+    let forward = solve_population_forward(
+        log_prod_mouse,
+        log_bbb,
+        log_deg,
+        init_state,
+        mouse_id,
+        obs_times,
+        n_mice,
+        t0,
+        tf,
+        dt,
+    )?;
+    let predictions = forward.predictions.clone();
+    let (grad_prod, grad_bbb, grad_deg) =
+        population_vjp_from_forward(forward, mouse_id, obs_times, cotangent, n_mice, t0, tf)?;
+
+    Ok((predictions, grad_prod, grad_bbb, grad_deg))
+}
+
 /// Solve the forward model with log-rate parameters.
 ///
 /// Predictions preserve `obs_times` order and duplicates.
@@ -136,6 +222,103 @@ pub fn solve_forward(
         predictions,
         solution,
     })
+}
+
+pub fn solve_population_forward(
+    log_prod_mouse: &[f64],
+    log_bbb: f64,
+    log_deg: f64,
+    init_state: State<f64>,
+    mouse_id: &[usize],
+    obs_times: &[f64],
+    n_mice: usize,
+    t0: f64,
+    tf: f64,
+    dt: f64,
+) -> Result<PopulationForwardResult, InferenceError> {
+    validate_population_inputs(
+        log_prod_mouse,
+        log_bbb,
+        log_deg,
+        init_state,
+        mouse_id,
+        obs_times,
+        n_mice,
+        t0,
+        tf,
+        dt,
+    )?;
+
+    let obs_by_mouse = observations_by_mouse(mouse_id, n_mice)?;
+    let mut predictions = vec![0.0; obs_times.len()];
+    let mut per_mouse_forward = vec![None; n_mice];
+
+    for (mouse, obs_indices) in obs_by_mouse.iter().enumerate() {
+        if obs_indices.is_empty() {
+            continue;
+        }
+
+        let mouse_obs_times = obs_indices
+            .iter()
+            .map(|&idx| obs_times[idx])
+            .collect::<Vec<_>>();
+        let log_params = [log_prod_mouse[mouse], log_bbb, log_deg];
+        let forward = solve_forward(log_params, init_state, &mouse_obs_times, t0, tf, dt)?;
+
+        for (&obs_idx, &prediction) in obs_indices.iter().zip(forward.predictions.iter()) {
+            predictions[obs_idx] = prediction;
+        }
+        per_mouse_forward[mouse] = Some(forward);
+    }
+
+    Ok(PopulationForwardResult {
+        log_prod_mouse: log_prod_mouse.to_vec(),
+        log_bbb,
+        log_deg,
+        predictions,
+        per_mouse_forward,
+    })
+}
+
+fn population_vjp_from_forward(
+    forward: PopulationForwardResult,
+    mouse_id: &[usize],
+    obs_times: &[f64],
+    cotangent: &[f64],
+    n_mice: usize,
+    t0: f64,
+    tf: f64,
+) -> Result<(Vec<f64>, f64, f64), InferenceError> {
+    if obs_times.len() != cotangent.len() {
+        return Err(InferenceError::LengthMismatch);
+    }
+    validate_cotangents(cotangent)?;
+    let obs_by_mouse = observations_by_mouse(mouse_id, n_mice)?;
+
+    let mut grad_log_prod_mouse = vec![0.0; n_mice];
+    let mut grad_log_bbb = 0.0;
+    let mut grad_log_deg = 0.0;
+
+    for (mouse, obs_indices) in obs_by_mouse.iter().enumerate() {
+        let Some(mouse_forward) = forward.per_mouse_forward[mouse].clone() else {
+            continue;
+        };
+
+        let mouse_obs_times = obs_indices
+            .iter()
+            .map(|&idx| obs_times[idx])
+            .collect::<Vec<_>>();
+        let mouse_cotangent = obs_indices
+            .iter()
+            .map(|&idx| cotangent[idx])
+            .collect::<Vec<_>>();
+        let gradient = vjp_from_forward(mouse_forward, &mouse_obs_times, &mouse_cotangent, t0, tf)?;
+        grad_log_prod_mouse[mouse] += gradient[0];
+        grad_log_bbb += gradient[1];
+        grad_log_deg += gradient[2];
+    }
+
+    Ok((grad_log_prod_mouse, grad_log_bbb, grad_log_deg))
 }
 
 fn vjp_from_forward(
@@ -197,6 +380,58 @@ fn validate_inputs(
     Ok(())
 }
 
+fn validate_population_inputs(
+    log_prod_mouse: &[f64],
+    log_bbb: f64,
+    log_deg: f64,
+    init_state: State<f64>,
+    mouse_id: &[usize],
+    obs_times: &[f64],
+    n_mice: usize,
+    t0: f64,
+    tf: f64,
+    dt: f64,
+) -> Result<(), InferenceError> {
+    if n_mice == 0 {
+        return Err(InferenceError::InvalidMouseCount);
+    }
+    if log_prod_mouse.len() != n_mice {
+        return Err(InferenceError::LogProdMouseLengthMismatch);
+    }
+    if mouse_id.len() != obs_times.len() {
+        return Err(InferenceError::MouseIdLengthMismatch);
+    }
+    if mouse_id.iter().any(|&id| id >= n_mice) {
+        return Err(InferenceError::MouseIdOutOfBounds);
+    }
+    if !log_prod_mouse.iter().all(|v| v.is_finite()) || !log_bbb.is_finite() || !log_deg.is_finite()
+    {
+        return Err(InferenceError::NonFiniteLogParams);
+    }
+    validate_inputs(
+        [log_prod_mouse[0], log_bbb, log_deg],
+        init_state,
+        obs_times,
+        t0,
+        tf,
+        dt,
+    )
+}
+
+fn observations_by_mouse(
+    mouse_id: &[usize],
+    n_mice: usize,
+) -> Result<Vec<Vec<usize>>, InferenceError> {
+    let mut obs_by_mouse = vec![Vec::new(); n_mice];
+    for (obs_idx, &mouse) in mouse_id.iter().enumerate() {
+        if mouse >= n_mice {
+            return Err(InferenceError::MouseIdOutOfBounds);
+        }
+        obs_by_mouse[mouse].push(obs_idx);
+    }
+    Ok(obs_by_mouse)
+}
+
 fn validate_cotangents(cotangent: &[f64]) -> Result<(), InferenceError> {
     if !cotangent.iter().all(|v| v.is_finite()) {
         return Err(InferenceError::NonFiniteCotangents);
@@ -209,6 +444,15 @@ fn validate_cotangents(cotangent: &[f64]) -> Result<(), InferenceError> {
 struct CachedForward {
     log_params: [f64; 3],
     forward: ConstitutiveForwardResult,
+}
+
+#[cfg(feature = "py")]
+#[derive(Clone)]
+struct PopulationCachedForward {
+    log_prod_mouse: Vec<f64>,
+    log_bbb: f64,
+    log_deg: f64,
+    forward: PopulationForwardResult,
 }
 
 #[cfg(feature = "py")]
@@ -228,7 +472,7 @@ impl PyInferenceSolver {
     #[new]
     #[pyo3(signature = (obs_time, *, init_state=None, t0=0.0, tf=None, dt=0.25))]
     fn new(
-        obs_time: PyReadonlyArray1<'_, f64>,
+        obs_time: PyArrayLike1<'_, f64, AllowTypeChange>,
         init_state: Option<PyState>,
         t0: f64,
         tf: Option<f64>,
@@ -266,7 +510,7 @@ impl PyInferenceSolver {
     fn predict<'py>(
         &self,
         py: Python<'py>,
-        log_params: PyReadonlyArray1<'_, f64>,
+        log_params: PyArrayLike1<'_, f64, AllowTypeChange>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let log_params = py_log_params(log_params)?;
         let obs_time = self.obs_time.clone();
@@ -297,8 +541,8 @@ impl PyInferenceSolver {
     fn predict_and_vjp<'py>(
         &self,
         py: Python<'py>,
-        log_params: PyReadonlyArray1<'_, f64>,
-        cotangent: PyReadonlyArray1<'_, f64>,
+        log_params: PyArrayLike1<'_, f64, AllowTypeChange>,
+        cotangent: PyArrayLike1<'_, f64, AllowTypeChange>,
     ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
         let log_params = py_log_params(log_params)?;
         let cotangent = cotangent.as_array().iter().copied().collect::<Vec<f64>>();
@@ -368,6 +612,247 @@ impl PyInferenceSolver {
 }
 
 #[cfg(feature = "py")]
+#[pyclass(name = "PopulationInferenceSolver")]
+pub struct PyPopulationInferenceSolver {
+    mouse_id: Vec<usize>,
+    obs_time: Vec<f64>,
+    n_mice: usize,
+    init_state: State<f64>,
+    t0: f64,
+    tf: f64,
+    dt: f64,
+    cached_forward: Mutex<Option<PopulationCachedForward>>,
+}
+
+#[cfg(feature = "py")]
+#[pymethods]
+impl PyPopulationInferenceSolver {
+    #[new]
+    #[pyo3(signature = (mouse_id, obs_time, n_mice, *, init_state=None, t0=0.0, tf=None, dt=0.25))]
+    fn new(
+        mouse_id: PyArrayLike1<'_, i64>,
+        obs_time: PyArrayLike1<'_, f64, AllowTypeChange>,
+        n_mice: usize,
+        init_state: Option<PyState>,
+        t0: f64,
+        tf: Option<f64>,
+        dt: f64,
+    ) -> PyResult<Self> {
+        let raw_mouse_id = mouse_id.as_array().iter().copied().collect::<Vec<i64>>();
+        let mouse_id = py_mouse_id(raw_mouse_id)?;
+        let obs_time = obs_time.as_array().iter().copied().collect::<Vec<f64>>();
+        let tf = match tf {
+            Some(value) => value,
+            None => obs_time.iter().copied().reduce(f64::max).ok_or_else(|| {
+                PyValueError::new_err("obs_time must not be empty when tf is None")
+            })?,
+        };
+        let init_state = init_state
+            .map(|state| state.inner)
+            .unwrap_or_else(State::zeros);
+
+        validate_population_inputs(
+            &vec![0.0; n_mice],
+            0.0,
+            0.0,
+            init_state,
+            &mouse_id,
+            &obs_time,
+            n_mice,
+            t0,
+            tf,
+            dt,
+        )
+        .map_err(py_inference_error)?;
+
+        Ok(Self {
+            mouse_id,
+            obs_time,
+            n_mice,
+            init_state,
+            t0,
+            tf,
+            dt,
+            cached_forward: Mutex::new(None),
+        })
+    }
+
+    #[getter]
+    fn get_n_obs(&self) -> usize {
+        self.obs_time.len()
+    }
+
+    #[getter]
+    fn get_n_mice(&self) -> usize {
+        self.n_mice
+    }
+
+    fn predict<'py>(
+        &self,
+        py: Python<'py>,
+        log_prod_mouse: PyArrayLike1<'_, f64, AllowTypeChange>,
+        log_bbb: f64,
+        log_deg: f64,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let log_prod_mouse = py_log_prod_mouse(log_prod_mouse, self.n_mice)?;
+        if !log_bbb.is_finite() || !log_deg.is_finite() {
+            return Err(py_inference_error(InferenceError::NonFiniteLogParams));
+        }
+
+        let mouse_id = self.mouse_id.clone();
+        let obs_time = self.obs_time.clone();
+        let n_mice = self.n_mice;
+        let init_state = self.init_state;
+        let t0 = self.t0;
+        let tf = self.tf;
+        let dt = self.dt;
+
+        let forward = py
+            .detach(move || {
+                solve_population_forward(
+                    &log_prod_mouse,
+                    log_bbb,
+                    log_deg,
+                    init_state,
+                    &mouse_id,
+                    &obs_time,
+                    n_mice,
+                    t0,
+                    tf,
+                    dt,
+                )
+            })
+            .map_err(py_inference_error)?;
+        let predictions = forward.predictions.clone();
+
+        {
+            let mut cache = self
+                .cached_forward
+                .lock()
+                .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+            *cache = Some(PopulationCachedForward {
+                log_prod_mouse: forward.log_prod_mouse.clone(),
+                log_bbb,
+                log_deg,
+                forward,
+            });
+        }
+
+        Ok(PyArray1::from_vec(py, predictions))
+    }
+
+    fn predict_and_vjp<'py>(
+        &self,
+        py: Python<'py>,
+        log_prod_mouse: PyArrayLike1<'_, f64, AllowTypeChange>,
+        log_bbb: f64,
+        log_deg: f64,
+        cotangent: PyArrayLike1<'_, f64, AllowTypeChange>,
+    ) -> PyResult<(
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        f64,
+        f64,
+    )> {
+        let log_prod_mouse = py_log_prod_mouse(log_prod_mouse, self.n_mice)?;
+        if !log_bbb.is_finite() || !log_deg.is_finite() {
+            return Err(py_inference_error(InferenceError::NonFiniteLogParams));
+        }
+        let cotangent = cotangent.as_array().iter().copied().collect::<Vec<f64>>();
+        if cotangent.len() != self.obs_time.len() {
+            return Err(PyValueError::new_err(format!(
+                "cotangent length {} does not match n_obs {}",
+                cotangent.len(),
+                self.obs_time.len()
+            )));
+        }
+        validate_cotangents(&cotangent).map_err(py_inference_error)?;
+
+        let cached_forward = {
+            let cache = self
+                .cached_forward
+                .lock()
+                .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+            cache
+                .as_ref()
+                .filter(|cached| {
+                    same_population_log_params(
+                        &cached.log_prod_mouse,
+                        cached.log_bbb,
+                        cached.log_deg,
+                        &log_prod_mouse,
+                        log_bbb,
+                        log_deg,
+                    )
+                })
+                .map(|cached| cached.forward.clone())
+        };
+
+        let mouse_id = self.mouse_id.clone();
+        let obs_time = self.obs_time.clone();
+        let n_mice = self.n_mice;
+        let init_state = self.init_state;
+        let t0 = self.t0;
+        let tf = self.tf;
+        let dt = self.dt;
+
+        let (forward, grad_prod, grad_bbb, grad_deg) = py
+            .detach(move || {
+                let forward = match cached_forward {
+                    Some(forward) => forward,
+                    None => solve_population_forward(
+                        &log_prod_mouse,
+                        log_bbb,
+                        log_deg,
+                        init_state,
+                        &mouse_id,
+                        &obs_time,
+                        n_mice,
+                        t0,
+                        tf,
+                        dt,
+                    )?,
+                };
+                let predictions_forward = forward.clone();
+                let (grad_prod, grad_bbb, grad_deg) = population_vjp_from_forward(
+                    forward, &mouse_id, &obs_time, &cotangent, n_mice, t0, tf,
+                )?;
+                Ok::<_, InferenceError>((predictions_forward, grad_prod, grad_bbb, grad_deg))
+            })
+            .map_err(py_inference_error)?;
+
+        {
+            let mut cache = self
+                .cached_forward
+                .lock()
+                .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+            *cache = Some(PopulationCachedForward {
+                log_prod_mouse: forward.log_prod_mouse.clone(),
+                log_bbb,
+                log_deg,
+                forward: forward.clone(),
+            });
+        }
+
+        Ok((
+            PyArray1::from_vec(py, forward.predictions),
+            PyArray1::from_vec(py, grad_prod),
+            grad_bbb,
+            grad_deg,
+        ))
+    }
+
+    fn clear_cache(&self) -> PyResult<()> {
+        let mut cache = self
+            .cached_forward
+            .lock()
+            .map_err(|_| PyValueError::new_err("inference solver cache lock poisoned"))?;
+        *cache = None;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "py")]
 fn same_log_params(a: [f64; 3], b: [f64; 3]) -> bool {
     a.iter()
         .zip(b.iter())
@@ -375,7 +860,58 @@ fn same_log_params(a: [f64; 3], b: [f64; 3]) -> bool {
 }
 
 #[cfg(feature = "py")]
-fn py_log_params(log_params: PyReadonlyArray1<'_, f64>) -> PyResult<[f64; 3]> {
+fn same_population_log_params(
+    a_prod: &[f64],
+    a_bbb: f64,
+    a_deg: f64,
+    b_prod: &[f64],
+    b_bbb: f64,
+    b_deg: f64,
+) -> bool {
+    a_bbb.to_bits() == b_bbb.to_bits()
+        && a_deg.to_bits() == b_deg.to_bits()
+        && a_prod.len() == b_prod.len()
+        && a_prod
+            .iter()
+            .zip(b_prod.iter())
+            .all(|(left, right)| left.to_bits() == right.to_bits())
+}
+
+#[cfg(feature = "py")]
+fn py_mouse_id(raw_mouse_id: Vec<i64>) -> PyResult<Vec<usize>> {
+    raw_mouse_id
+        .into_iter()
+        .map(|id| {
+            usize::try_from(id).map_err(|_| PyValueError::new_err("mouse_id must be nonnegative"))
+        })
+        .collect()
+}
+
+#[cfg(feature = "py")]
+fn py_log_prod_mouse(
+    log_prod_mouse: PyArrayLike1<'_, f64, AllowTypeChange>,
+    n_mice: usize,
+) -> PyResult<Vec<f64>> {
+    let log_prod_mouse = log_prod_mouse
+        .as_array()
+        .iter()
+        .copied()
+        .collect::<Vec<f64>>();
+    if log_prod_mouse.len() != n_mice {
+        return Err(PyValueError::new_err(format!(
+            "log_prod_mouse length {} does not match n_mice {}",
+            log_prod_mouse.len(),
+            n_mice
+        )));
+    }
+    if !log_prod_mouse.iter().all(|v| v.is_finite()) {
+        return Err(py_inference_error(InferenceError::NonFiniteLogParams));
+    }
+    Ok(log_prod_mouse)
+}
+
+#[cfg(feature = "py")]
+fn py_log_params(log_params: PyArrayLike1<'_, f64, AllowTypeChange>) -> PyResult<[f64; 3]> {
     let log_params = log_params.as_array().iter().copied().collect::<Vec<f64>>();
     if log_params.len() != 3 {
         return Err(PyValueError::new_err(format!(
@@ -419,7 +955,7 @@ mod tests {
     const DT: f64 = 0.25;
 
     #[test]
-    fn predict_preserves_observation_order_and_duplicates() -> Result<(), InferenceError> {
+    fn preserve_obs_order_and_duplicates() -> Result<(), InferenceError> {
         let log_params = [0.2_f64.ln(), 0.6_f64.ln(), 0.007_f64.ln()];
         let obs_times = [12.0, 1.0, 12.0, 6.0];
 
@@ -431,7 +967,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_cotangent_returns_zero_gradient() -> Result<(), InferenceError> {
+    fn zero_cotangent_and_gradient() -> Result<(), InferenceError> {
         let log_params = [0.2_f64.ln(), 0.6_f64.ln(), 0.007_f64.ln()];
         let obs_times = [1.0, 6.0, 12.0, 24.0];
         let cotangent = [0.0; 4];
@@ -457,7 +993,7 @@ mod tests {
     }
 
     #[test]
-    fn vjp_matches_finite_difference_log_params() -> Result<(), InferenceError> {
+    fn vjp_matches_finite_difference() -> Result<(), InferenceError> {
         let log_params = [0.2_f64.ln(), 0.6_f64.ln(), 0.007_f64.ln()];
         let obs_times = [1.0, 6.0, 12.0, 24.0];
         let cotangent = [0.25, -0.5, 0.75, 1.25];
@@ -501,7 +1037,246 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_cotangent_times_are_summed_for_vjp() -> Result<(), InferenceError> {
+    fn pop_preserves_obs_order_duplicates_and_empty_mice() -> Result<(), InferenceError> {
+        let log_prod_mouse = [0.2_f64.ln(), 0.4_f64.ln(), 0.8_f64.ln()];
+        let log_bbb = 0.6_f64.ln();
+        let log_deg = 0.007_f64.ln();
+        let mouse_id = [1, 0, 1, 0];
+        let obs_times = [12.0, 1.0, 12.0, 6.0];
+
+        let predictions = population_predict(
+            &log_prod_mouse,
+            log_bbb,
+            log_deg,
+            State::zeros(),
+            &mouse_id,
+            &obs_times,
+            3,
+            T0,
+            TF,
+            DT,
+        )?;
+
+        assert_eq!(predictions.len(), obs_times.len());
+        assert_eq!(predictions[0], predictions[2]);
+        Ok(())
+    }
+
+    #[test]
+    fn pop_zero_cotangent_and_gradient() -> Result<(), InferenceError> {
+        let log_prod_mouse = [0.2_f64.ln(), 0.4_f64.ln(), 0.8_f64.ln()];
+        let mouse_id = [0, 0, 1, 1];
+        let obs_times = [1.0, 6.0, 12.0, 24.0];
+        let cotangent = [0.0; 4];
+
+        let (_predictions, grad_prod, grad_bbb, grad_deg) = population_predict_and_vjp(
+            &log_prod_mouse,
+            0.6_f64.ln(),
+            0.007_f64.ln(),
+            State::zeros(),
+            &mouse_id,
+            &obs_times,
+            &cotangent,
+            3,
+            T0,
+            TF,
+            DT,
+        )?;
+
+        for value in grad_prod {
+            assert!(value.abs() < 1e-12);
+        }
+        assert!(grad_bbb.abs() < 1e-12);
+        assert!(grad_deg.abs() < 1e-12);
+        Ok(())
+    }
+
+    #[test]
+    fn pop_vjp_matches_finite_difference() -> Result<(), InferenceError> {
+        let log_prod_mouse = [0.2_f64.ln(), 0.4_f64.ln()];
+        let log_bbb = 0.6_f64.ln();
+        let log_deg = 0.007_f64.ln();
+        let mouse_id = [0, 0, 1, 1, 0];
+        let obs_times = [1.0, 6.0, 1.0, 12.0, 24.0];
+        let cotangent = [0.25, -0.5, 0.75, 1.25, -0.4];
+
+        let (_predictions, grad_prod, grad_bbb, grad_deg) = population_predict_and_vjp(
+            &log_prod_mouse,
+            log_bbb,
+            log_deg,
+            State::zeros(),
+            &mouse_id,
+            &obs_times,
+            &cotangent,
+            2,
+            T0,
+            TF,
+            DT,
+        )?;
+
+        let scalar = |prod: &[f64], bbb: f64, deg: f64| -> Result<f64, InferenceError> {
+            let predictions = population_predict(
+                prod,
+                bbb,
+                deg,
+                State::zeros(),
+                &mouse_id,
+                &obs_times,
+                2,
+                T0,
+                TF,
+                DT,
+            )?;
+            Ok(predictions
+                .iter()
+                .zip(cotangent.iter())
+                .map(|(prediction, cotangent)| prediction * cotangent)
+                .sum())
+        };
+
+        let step = 1e-6;
+        for mouse in 0..2 {
+            let mut plus = log_prod_mouse;
+            let mut minus = log_prod_mouse;
+            plus[mouse] += step;
+            minus[mouse] -= step;
+            let fd = (scalar(&plus, log_bbb, log_deg)? - scalar(&minus, log_bbb, log_deg)?)
+                / (2.0 * step);
+            let err = (grad_prod[mouse] - fd).abs();
+            let scale = fd.abs().max(1.0);
+            assert!(
+                err <= 1e-4 + 1e-3 * scale,
+                "population prod VJP mismatch at mouse {mouse}: adjoint={}, finite_diff={fd}, err={err}",
+                grad_prod[mouse]
+            );
+        }
+
+        for (name, adjoint, plus_args, minus_args) in [
+            (
+                "bbb",
+                grad_bbb,
+                (log_bbb + step, log_deg),
+                (log_bbb - step, log_deg),
+            ),
+            (
+                "deg",
+                grad_deg,
+                (log_bbb, log_deg + step),
+                (log_bbb, log_deg - step),
+            ),
+        ] {
+            let fd = (scalar(&log_prod_mouse, plus_args.0, plus_args.1)?
+                - scalar(&log_prod_mouse, minus_args.0, minus_args.1)?)
+                / (2.0 * step);
+            let err = (adjoint - fd).abs();
+            let scale = fd.abs().max(1.0);
+            assert!(
+                err <= 1e-4 + 1e-3 * scale,
+                "population {name} VJP mismatch: adjoint={adjoint}, finite_diff={fd}, err={err}",
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn pop_global_gradient_accumulates_over_mice() -> Result<(), InferenceError> {
+        let log_prod_mouse = [0.2_f64.ln(), 0.4_f64.ln()];
+        let log_bbb = 0.6_f64.ln();
+        let log_deg = 0.007_f64.ln();
+        let mouse_id = [0, 0, 1, 1];
+        let obs_times = [1.0, 6.0, 1.0, 12.0];
+        let cotangent = [0.25, -0.5, 0.75, 1.25];
+
+        let (_predictions, _grad_prod, grad_bbb, grad_deg) = population_predict_and_vjp(
+            &log_prod_mouse,
+            log_bbb,
+            log_deg,
+            State::zeros(),
+            &mouse_id,
+            &obs_times,
+            &cotangent,
+            2,
+            T0,
+            TF,
+            DT,
+        )?;
+
+        let (_p0, g0) = predict_and_vjp(
+            [log_prod_mouse[0], log_bbb, log_deg],
+            State::zeros(),
+            &[1.0, 6.0],
+            &[0.25, -0.5],
+            T0,
+            TF,
+            DT,
+        )?;
+        let (_p1, g1) = predict_and_vjp(
+            [log_prod_mouse[1], log_bbb, log_deg],
+            State::zeros(),
+            &[1.0, 12.0],
+            &[0.75, 1.25],
+            T0,
+            TF,
+            DT,
+        )?;
+
+        assert!((grad_bbb - (g0[1] + g1[1])).abs() < 1e-10);
+        assert!((grad_deg - (g0[2] + g1[2])).abs() < 1e-10);
+        Ok(())
+    }
+
+    #[test]
+    fn pop_sum_duplicate_cotangent_times_per_mouse() -> Result<(), InferenceError> {
+        let log_prod_mouse = [0.2_f64.ln(), 0.4_f64.ln()];
+        let log_bbb = 0.6_f64.ln();
+        let log_deg = 0.007_f64.ln();
+
+        let duplicated_mouse_id = [0, 0, 1, 1];
+        let duplicated_times = [1.0, 1.0, 6.0, 6.0];
+        let duplicated_cotangent = [0.25, -0.75, 1.5, -0.5];
+        let (_predictions, duplicated_prod, duplicated_bbb, duplicated_deg) =
+            population_predict_and_vjp(
+                &log_prod_mouse,
+                log_bbb,
+                log_deg,
+                State::zeros(),
+                &duplicated_mouse_id,
+                &duplicated_times,
+                &duplicated_cotangent,
+                2,
+                T0,
+                TF,
+                DT,
+            )?;
+
+        let summed_mouse_id = [0, 1];
+        let summed_times = [1.0, 6.0];
+        let summed_cotangent = [-0.5, 1.0];
+        let (_predictions, summed_prod, summed_bbb, summed_deg) = population_predict_and_vjp(
+            &log_prod_mouse,
+            log_bbb,
+            log_deg,
+            State::zeros(),
+            &summed_mouse_id,
+            &summed_times,
+            &summed_cotangent,
+            2,
+            T0,
+            TF,
+            DT,
+        )?;
+
+        for mouse in 0..2 {
+            assert!((duplicated_prod[mouse] - summed_prod[mouse]).abs() < 1e-10);
+        }
+        assert!((duplicated_bbb - summed_bbb).abs() < 1e-10);
+        assert!((duplicated_deg - summed_deg).abs() < 1e-10);
+        Ok(())
+    }
+
+    #[test]
+    fn sum_duplicate_cotangent_times() -> Result<(), InferenceError> {
         let log_params = [0.2_f64.ln(), 0.6_f64.ln(), 0.007_f64.ln()];
 
         let duplicated_times = [1.0, 1.0, 6.0, 12.0];

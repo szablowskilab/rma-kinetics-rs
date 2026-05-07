@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 
 class _ConstitutiveModule:
     InferenceSolver: type[Any]
+    PopulationInferenceSolver: type[Any]
     Model: type[Any]
     State: type[Any]
     StochasticModel: type[Any]

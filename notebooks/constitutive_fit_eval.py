@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.23.5"
 app = marimo.App(width="medium")
 
 with app.setup:
@@ -69,19 +69,29 @@ def _(
 ):
     # plot predictions
     colors = sb.color_palette("colorblind", 3)
-    shapes = ['o', '^', 's']
+    shapes = ["o", "^", "s"]
 
     time = np.linspace(0, 505, 505)
 
-    for (mean, hdi, df, label), color, shape in zip([
-        (ca1_mean, ca1_hdi, ca1_summary_df, "Hippocampus"),
-        (sn_mean,  sn_hdi,  sn_summary_df,  "Midbrain"),
-        (cp_mean,  cp_hdi,  cp_summary_df,  "Striatum"),
-    ], colors, shapes):
+    for (mean, hdi, df, label), color, shape in zip(
+        [
+            (ca1_mean, ca1_hdi, ca1_summary_df, "Hippocampus"),
+            (sn_mean, sn_hdi, sn_summary_df, "Midbrain"),
+            (cp_mean, cp_hdi, cp_summary_df, "Striatum"),
+        ],
+        colors,
+        shapes,
+    ):
         plt.plot(time, mean, color=color, label=label)
         plt.fill_between(time, hdi[:, 0], hdi[:, 1], color=color, alpha=0.25)
-        plt.errorbar(df["time"], df["mean"], yerr=df["std"],
-                     fmt=shape, color=color, capsize=3)
+        plt.errorbar(
+            df["time"],
+            df["mean"],
+            yerr=df["std"],
+            fmt=shape,
+            color=color,
+            capsize=3,
+        )
 
     plt.xlabel("Time (hr)")
     plt.ylabel("Concentration (nM)")
@@ -94,6 +104,7 @@ def _(
 
 @app.function
 # calculate R2s
+
 
 def score(predicted, observed) -> float:
     predicted_rma = [predicted[0], predicted[336], predicted[504]]
@@ -123,8 +134,12 @@ def _(
 
 @app.function
 def get_parameter(df: pl.DataFrame, name: str, correction: float = 0) -> float:
-    log_params = df.filter(pl.col("") == name).select(pl.col("mean"), pl.col("hdi_3%"), pl.col("hdi_97%"))
-    params = log_params.map_columns(["mean", "hdi_3%", "hdi_97%"], lambda v: np.exp(v + correction**2/2))
+    log_params = df.filter(pl.col("") == name).select(
+        pl.col("mean"), pl.col("hdi_3%"), pl.col("hdi_97%")
+    )
+    params = log_params.map_columns(
+        ["mean", "hdi_3%", "hdi_97%"], lambda v: np.exp(v + correction**2 / 2)
+    )
     return params
 
 
@@ -136,7 +151,9 @@ def _(ca1_param_summary_full):
 
 @app.cell
 def _(ca1_dir):
-    ca1_param_summary_full = pl.read_csv(os.path.join(ca1_dir, "parameter_fit_summary.csv"))
+    ca1_param_summary_full = pl.read_csv(
+        os.path.join(ca1_dir, "parameter_fit_summary.csv")
+    )
     ca1_prod = get_parameter(ca1_param_summary_full, "mu_log_prod", correction=0.5)
     ca1_prod
     return (ca1_param_summary_full,)
@@ -158,7 +175,9 @@ def _(ca1_param_summary_full):
 
 @app.cell
 def _(sn_dir):
-    sn_param_summary_full = pl.read_csv(os.path.join(sn_dir, "parameter_fit_summary.csv"))
+    sn_param_summary_full = pl.read_csv(
+        os.path.join(sn_dir, "parameter_fit_summary.csv")
+    )
     sn_prod = get_parameter(sn_param_summary_full, "mu_log_prod", correction=0.5)
     sn_prod
     return (sn_param_summary_full,)
@@ -180,7 +199,9 @@ def _(sn_param_summary_full):
 
 @app.cell
 def _(cp_dir):
-    cp_param_summary_full = pl.read_csv(os.path.join(cp_dir, "parameter_fit_summary.csv"))
+    cp_param_summary_full = pl.read_csv(
+        os.path.join(cp_dir, "parameter_fit_summary.csv")
+    )
     cp_prod = get_parameter(cp_param_summary_full, "mu_log_prod", correction=0.5)
     cp_prod
     return (cp_param_summary_full,)
