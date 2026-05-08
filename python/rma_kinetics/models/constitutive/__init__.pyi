@@ -78,7 +78,6 @@ class StochasticModel:
         bbb_transport: float = 0.6,
         deg: float = 0.007,
         prod_noise: float = 0.5,
-        transport_noise: float = 0.1,
         seed: int = 42,
     ) -> None: ...
     def solve(

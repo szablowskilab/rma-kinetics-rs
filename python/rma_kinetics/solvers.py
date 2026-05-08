@@ -39,7 +39,7 @@ class RungeKutta4(Solver):
 class RungeKutta45(Solver):
     """Runge-Kutta-Fehlberg 4(5) method with error estimation"""
 
-    solvet_type: str = field(default="rkf45", init=False, repr=False)
+    solver_type: str = field(default="rkf45", init=False, repr=False)
 
 
 @dataclass

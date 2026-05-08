@@ -24,7 +24,6 @@ const DEFAULT_BBB_TRANSPORT: f64 = 0.6;
 /// Default oscillating RMA degradation rate.
 const DEFAULT_DEG: f64 = 0.007;
 const DEFAULT_PROD_STDV: f64 = 0.5;
-const DEFAULT_TRANSPORT_STDV: f64 = 0.1;
 const DEFAULT_SEED: u64 = 42;
 
 fn rng_from_seed(seed: u64) -> StdRng {
@@ -50,8 +49,6 @@ pub struct StochasticModel {
     /// Gaussian noise standard deviation of protein production and secretion.
     #[builder(default = "DEFAULT_PROD_STDV")]
     pub prod_noise: f64,
-    #[builder(default = "DEFAULT_TRANSPORT_STDV")]
-    pub transport_noise: f64,
     /// Random seed used to initialize the RNG.
     #[builder(default = "DEFAULT_SEED")]
     pub seed: u64,
@@ -68,7 +65,6 @@ impl StochasticModel {
         bbb_transport: f64,
         deg: f64,
         prod_noise: f64,
-        transport_noise: f64,
         seed: u64,
     ) -> Self {
         Self {
@@ -77,7 +73,6 @@ impl StochasticModel {
             bbb_transport,
             deg,
             prod_noise,
-            transport_noise,
             seed,
             rng: rng_from_seed(seed),
         }
@@ -112,7 +107,6 @@ impl StochasticModel {
         bbb_transport=DEFAULT_BBB_TRANSPORT,
         deg=DEFAULT_DEG,
         prod_noise=DEFAULT_PROD_STDV,
-        transport_noise=DEFAULT_TRANSPORT_STDV,
         seed=DEFAULT_SEED,
     ))]
     pub fn create(
@@ -121,18 +115,9 @@ impl StochasticModel {
         bbb_transport: f64,
         deg: f64,
         prod_noise: f64,
-        transport_noise: f64,
         seed: u64,
     ) -> Self {
-        Self::new(
-            prod,
-            freq,
-            bbb_transport,
-            deg,
-            prod_noise,
-            transport_noise,
-            seed,
-        )
+        Self::new(prod, freq, bbb_transport, deg, prod_noise, seed)
     }
 
     #[pyo3(name = "solve")]
@@ -169,7 +154,6 @@ struct ModelSerde {
     bbb_transport: f64,
     deg: f64,
     prod_noise: f64,
-    transport_noise: f64,
     seed: u64,
 }
 
@@ -182,7 +166,6 @@ impl From<ModelSerde> for StochasticModel {
             value.bbb_transport,
             value.deg,
             value.prod_noise,
-            value.transport_noise,
             value.seed,
         )
     }
@@ -197,7 +180,6 @@ impl From<StochasticModel> for ModelSerde {
             bbb_transport: value.bbb_transport,
             deg: value.deg,
             prod_noise: value.prod_noise,
-            transport_noise: value.transport_noise,
             seed: value.seed,
         }
     }
@@ -213,16 +195,16 @@ impl SDE<f64, State<f64>> for StochasticModel {
     }
 
     /// Diffusion term for oscillating RMA expression.
-    fn diffusion(&self, _t: f64, y: &State<f64>, dydw: &mut State<f64>) {
-        dydw.brain_rma = self.prod_noise * y.brain_rma;
-        dydw.plasma_rma = self.transport_noise * y.plasma_rma;
+    fn diffusion(&self, _t: f64, _y: &State<f64>, dydw: &mut State<f64>) {
+        dydw.brain_rma = self.prod_noise * self.prod;
+        dydw.plasma_rma = 0.0;
     }
 
     /// Noise term for oscillating RMA expression.
     fn noise(&mut self, dt: f64, dw: &mut State<f64>) {
         let normal = Normal::new(0.0, dt.sqrt()).unwrap();
         dw.brain_rma = normal.sample(&mut self.rng);
-        dw.plasma_rma = normal.sample(&mut self.rng);
+        dw.plasma_rma = 0.0;
     }
 }
 

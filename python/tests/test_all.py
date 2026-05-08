@@ -92,7 +92,7 @@ def test_constitutive_solve():
 
 def test_stochastic_constitutive_model_creation():
     models.constitutive.StochasticModel()
-    models.constitutive.StochasticModel(0.4, 0.5, 0.005, 0.4, 0.1)  # custom rates
+    models.constitutive.StochasticModel(0.4, 0.5, 0.005, 0.1)  # custom rates
 
 
 def test_stochastic_constitutive_solve():
@@ -474,7 +474,7 @@ def test_oscillation_solve():
 
 def test_stochastic_oscillation_model_creation():
     models.oscillation.StochasticModel()
-    models.oscillation.StochasticModel(0.4, 0.5, 0.005, 0.4, 0.1)  # custom rates
+    models.oscillation.StochasticModel(0.4, 0.05, 0.6, 0.005, 0.1)  # custom rates
 
 
 def test_stochastic_oscillation_solve():

@@ -143,6 +143,20 @@ pub fn stochastic_py_solve_derive(input: TokenStream) -> TokenStream {
                             .max_scale(solver.max_scale);
                         problem.even(dt).method(solver_instance).solve()?
                     },
+                    "rk4" => {
+                        let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::rk4(solver.dt0)
+                            .rtol(solver.rtol)
+                            .atol(solver.atol)
+                            .h0(solver.dt0)
+                            .h_min(solver.min_dt)
+                            .h_max(solver.max_dt)
+                            .max_steps(solver.max_steps)
+                            .max_rejects(solver.max_rejected_steps)
+                            .safety_factor(solver.safety_factor)
+                            .min_scale(solver.min_scale)
+                            .max_scale(solver.max_scale);
+                        problem.even(dt).method(solver_instance).solve()?
+                    },
                     "midpoint" => {
                         let mut solver_instance = differential_equations::methods::ExplicitRungeKutta::midpoint(solver.dt0)
                             .rtol(solver.rtol)
@@ -185,7 +199,7 @@ pub fn stochastic_py_solve_derive(input: TokenStream) -> TokenStream {
                             .max_scale(solver.max_scale);
                         problem.even(dt).method(solver_instance).solve()?
                     }
-                    _ => panic!("Solver '{}' is not supported for stochastic models. Use Euler, Midpoint, Heun, or Ralston.", solver.solver_type),
+                    _ => panic!("Solver '{}' is not supported for stochastic models. Use one of RK4, Euler, Midpoint, Heun, Ralston.", solver.solver_type),
                 };
 
                 Ok(crate::solve::PySolution {
